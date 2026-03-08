@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 
 // ── Types ─────────────────────────────────────────────────
@@ -341,6 +342,31 @@ export default function LowPolyBrain({
           blending={THREE.AdditiveBlending}
         />
       </points>
+
+      {/* Persistent region labels */}
+      {data.regions.map((region) => (
+        <Html
+          key={region.id}
+          position={region.center}
+          center
+          distanceFactor={5}
+          style={{ pointerEvents: 'none' }}
+        >
+          <div
+            style={{
+              color: '#ffffff',
+              fontSize: '11px',
+              fontWeight: 600,
+              textShadow: `0 0 6px ${region.color}, 0 0 12px ${region.color}, 0 0 24px rgba(0,0,0,1)`,
+              whiteSpace: 'nowrap',
+              opacity: 0.9,
+              userSelect: 'none',
+            }}
+          >
+            {region.label}
+          </div>
+        </Html>
+      ))}
     </group>
   )
 }

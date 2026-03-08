@@ -92,12 +92,10 @@ export default function BrainScene({
     ...proficiencyLevels,
   }), [proficiencyLevels])
 
-  // In idle / demo mode, no specific set of active regions — all glow at base level
-  // When a region is hovered, highlight that region
-  const activeRegions = useMemo(() => {
-    if (hoveredRegion) return new Set([hoveredRegion])
-    return undefined // all regions get base glow
-  }, [hoveredRegion])
+  // Don't restrict active regions on hover — the hover highlight is handled
+  // internally by LowPolyBrain's own hoveredRegion state. Setting activeRegions
+  // here would dim all other regions and wipe out the proficiency glow.
+  const activeRegions = undefined
 
   const handleRegionHover = useCallback((id: string | null) => {
     setHoveredRegion(id)
@@ -126,18 +124,7 @@ export default function BrainScene({
         />
       </Canvas>
 
-      {/* Region label tooltip - follows cursor */}
-      {hoveredRegion && (
-        <div 
-          className="fixed bg-black/80 border border-white/20 rounded-lg px-3 py-1.5 text-white text-sm font-medium backdrop-blur-sm pointer-events-none z-50"
-          style={{
-            left: mousePos.x + 15,
-            top: mousePos.y + 15,
-          }}
-        >
-          {hoveredRegion.replace('Region_', '')}
-        </div>
-      )}
+
     </div>
   )
 }
