@@ -20,17 +20,20 @@ const DEFAULT_PROFICIENCY: Record<string, number> = {
 
 export interface BrainSceneProps {
   proficiencyLevels?: Record<string, number>
+  triggerAnimation?: boolean
   onRegionClick?: (regionId: string) => void
 }
 
 function Scene({
   activeRegions,
   proficiencyLevels,
+  triggerAnimation,
   onRegionHover,
   onRegionClick,
 }: {
   activeRegions?: Set<string>
   proficiencyLevels?: Record<string, number>
+  triggerAnimation?: boolean
   onRegionHover?: (id: string | null) => void
   onRegionClick?: (id: string) => void
 }) {
@@ -47,6 +50,7 @@ function Scene({
         <LowPolyBrain
           activeRegions={activeRegions}
           proficiencyLevels={proficiencyLevels}
+          triggerAnimation={triggerAnimation}
           onRegionHover={onRegionHover}
           onRegionClick={onRegionClick}
         />
@@ -69,6 +73,7 @@ function Scene({
 
 export default function BrainScene({ 
   proficiencyLevels,
+  triggerAnimation,
   onRegionClick: externalOnRegionClick,
 }: BrainSceneProps = {}) {
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null)
@@ -112,6 +117,7 @@ export default function BrainScene({
         <Scene
           activeRegions={activeRegions}
           proficiencyLevels={mergedProficiency}
+          triggerAnimation={triggerAnimation}
           onRegionHover={handleRegionHover}
           onRegionClick={handleRegionClick}
         />

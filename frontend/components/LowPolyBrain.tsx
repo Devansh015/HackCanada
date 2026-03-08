@@ -39,11 +39,17 @@ interface Particle {
   regionSource: number
 }
 
+// ── BFS propagation constants ─────────────────────────────
+const BFS_NODES_PER_FRAME = 12    // How many BFS nodes to expand per frame (~3-4s total)
+const NODE_FADE_DURATION = 0.55   // Seconds for each node to fade from white → colored
+const LABEL_ACTIVATION_THRESHOLD = 0.6 // Fraction of region nodes that must be lit before label shows
+
 // ── Component ─────────────────────────────────────────────
 
 interface LowPolyBrainProps {
   activeRegions?: Set<string>
   proficiencyLevels?: Record<string, number>   // 0–1 per region id
+  triggerAnimation?: boolean  // flip to true to start BFS wave (e.g., after closing upload panel)
   onRegionHover?: (regionId: string | null) => void
   onRegionClick?: (regionId: string) => void
 }
@@ -51,6 +57,7 @@ interface LowPolyBrainProps {
 export default function LowPolyBrain({
   activeRegions,
   proficiencyLevels,
+  triggerAnimation,
   onRegionHover,
   onRegionClick,
 }: LowPolyBrainProps) {
@@ -60,6 +67,24 @@ export default function LowPolyBrain({
   const particlesRef = useRef<THREE.Points>(null)
   const [data, setData] = useState<BrainData | null>(null)
   const [hoveredRegion, setHoveredRegion] = useState<number | null>(null)
+  const [labelActivation, setLabelActivation] = useState<Record<string, number>>({})
+
+  // ── BFS propagation state (refs to avoid re-renders) ────
+  const prevProficiencyRef = useRef<Record<string, number>>({})
+  const nodeActivatedAtRef = useRef<Float32Array | null>(null) // time each node was activated (Infinity = not yet)
+  const bfsQueueRef = useRef<number[]>([])
+  const bfsVisitedRef = useRef<Uint8Array | null>(null)
+  const animStartTimeRef = useRef<number>(-1)
+  const bfsActiveRef = useRef(false) // is a BFS propagation currently running?
+  const initialLoadRef = useRef(true) // skip BFS on first profile load
+  const pendingBfsRegionsRef = useRef<number[]>([]) // regions waiting for triggerAnimation
+  const prevTriggerRef = useRef(false) // track triggerAnimation transitions
+
+  // ── Intro animation state ───────────────────────────────
+  const introPhaseRef = useRef<'idle' | 'brightening' | 'dimming' | 'done'>('idle')
+  const introStartRef = useRef<number>(-1)
+  const INTRO_BRIGHTEN_DURATION = 1.5
+  const INTRO_DIM_DURATION = 1.2
 
   // Load brain region data
   useEffect(() => {
@@ -68,7 +93,7 @@ export default function LowPolyBrain({
       .then((d: BrainData) => setData(d))
   }, [])
 
-  // ── Build geometries from data ──────────────────────────
+  // ── Build geometries + adjacency list from data ─────────
   const {
     edgeGeometry,
     edgeColors,
@@ -78,11 +103,20 @@ export default function LowPolyBrain({
     nodeRegionIds,
     particlePositions,
     particlesData,
+    adjacencyList,
   } = useMemo(() => {
     if (!data) return {} as any
 
     const { nodes, edges, regions } = data
     const regionColors = regions.map((r) => new THREE.Color(r.color))
+
+    // ─ Adjacency list for BFS ─────────────────────────────
+    const adjList: number[][] = new Array(nodes.length)
+    for (let i = 0; i < nodes.length; i++) adjList[i] = []
+    for (const [a, b] of edges) {
+      adjList[a].push(b)
+      adjList[b].push(a)
+    }
 
     // ─ Edge lines ─────────────────────────────────────────
     const edgeVerts = new Float32Array(edges.length * 6)
@@ -94,7 +128,6 @@ export default function LowPolyBrain({
       edgeVerts[i * 6 + 0] = pa[0]; edgeVerts[i * 6 + 1] = pa[1]; edgeVerts[i * 6 + 2] = pa[2]
       edgeVerts[i * 6 + 3] = pb[0]; edgeVerts[i * 6 + 4] = pb[1]; edgeVerts[i * 6 + 5] = pb[2]
 
-      // Blend colours of the two endpoints
       const ca = regionColors[nodes[a].region]
       const cb = regionColors[nodes[b].region]
       edgeCols[i * 6 + 0] = ca.r; edgeCols[i * 6 + 1] = ca.g; edgeCols[i * 6 + 2] = ca.b
@@ -141,96 +174,325 @@ export default function LowPolyBrain({
       nodeRegionIds: nRegion,
       particlePositions: pPos,
       particlesData: parts,
+      adjacencyList: adjList,
     }
   }, [data])
+
+  // ── Initialize BFS arrays when data loads ───────────────
+  useEffect(() => {
+    if (!data) return
+    const n = data.nodes.length
+    const arr = new Float32Array(n)
+    arr.fill(Infinity)
+    nodeActivatedAtRef.current = arr
+    bfsVisitedRef.current = new Uint8Array(n)
+  }, [data])
+
+  // ── Detect proficiency changes — queue regions, don't animate yet ──
+  useEffect(() => {
+    if (!data || !nodeActivatedAtRef.current || !adjacencyList) return
+
+    const prev = prevProficiencyRef.current
+    const curr = proficiencyLevels ?? {}
+    const { regions } = data
+    const activatedAt = nodeActivatedAtRef.current
+    const visited = bfsVisitedRef.current!
+
+    // On initial profile load, instantly show existing scores (no animation)
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false
+      const hasSomeScores = regions.some((r) => (curr[r.id] ?? 0) > 0)
+      if (hasSomeScores) {
+        for (let ri = 0; ri < regions.length; ri++) {
+          if ((curr[regions[ri].id] ?? 0) > 0) {
+            for (const nid of regions[ri].nodeIds) {
+              activatedAt[nid] = 0
+              visited[nid] = 1
+            }
+          }
+        }
+      }
+      prevProficiencyRef.current = { ...curr }
+      return
+    }
+
+    // Check if all scores went to 0 (reset / new session)
+    const allZero = regions.every((r) => (curr[r.id] ?? 0) <= 0)
+    if (allZero) {
+      activatedAt.fill(Infinity)
+      bfsQueueRef.current = []
+      visited.fill(0)
+      bfsActiveRef.current = false
+      pendingBfsRegionsRef.current = []
+      animStartTimeRef.current = -1
+      // Replay intro animation on reset
+      introPhaseRef.current = 'idle'
+      introStartRef.current = -1
+      setLabelActivation({})
+      prevProficiencyRef.current = { ...curr }
+      return
+    }
+
+    // Find regions whose proficiency meaningfully increased
+    const changedRegions: number[] = []
+    regions.forEach((r, ri) => {
+      const prevVal = prev[r.id] ?? 0
+      const currVal = curr[r.id] ?? 0
+      if (currVal > prevVal + 0.01) {
+        changedRegions.push(ri)
+      }
+    })
+
+    // Queue changed regions — BFS starts when triggerAnimation flips to true
+    if (changedRegions.length > 0) {
+      pendingBfsRegionsRef.current = [
+        ...pendingBfsRegionsRef.current,
+        ...changedRegions,
+      ]
+    }
+
+    prevProficiencyRef.current = { ...curr }
+  }, [proficiencyLevels, data, adjacencyList])
+
+  // ── Start BFS when triggerAnimation flips to true ───────
+  useEffect(() => {
+    if (!data || !nodeActivatedAtRef.current || !adjacencyList) return
+    // Detect rising edge: false → true
+    if (triggerAnimation && !prevTriggerRef.current) {
+      const pending = pendingBfsRegionsRef.current
+      if (pending.length > 0) {
+        const { regions, nodes } = data
+        const activatedAt = nodeActivatedAtRef.current
+        const visited = bfsVisitedRef.current!
+
+        // Reset activation for pending regions
+        for (const ri of pending) {
+          for (const nid of regions[ri].nodeIds) {
+            activatedAt[nid] = Infinity
+            visited[nid] = 0
+          }
+        }
+
+        // Find seed node for each region (closest to center)
+        const seeds: number[] = []
+        for (const ri of pending) {
+          const region = regions[ri]
+          const [cx, cy, cz] = region.center
+          let bestNode = region.nodeIds[0]
+          let bestDist = Infinity
+          for (const nid of region.nodeIds) {
+            const [nx, ny, nz] = nodes[nid].position
+            const d = (nx - cx) ** 2 + (ny - cy) ** 2 + (nz - cz) ** 2
+            if (d < bestDist) { bestDist = d; bestNode = nid }
+          }
+          seeds.push(bestNode)
+        }
+
+        animStartTimeRef.current = -1
+        const queue = bfsQueueRef.current
+        for (const seed of seeds) {
+          if (visited[seed]) continue
+          visited[seed] = 1
+          activatedAt[seed] = 0
+          queue.push(seed)
+        }
+        bfsActiveRef.current = true
+        pendingBfsRegionsRef.current = []
+      }
+    }
+    prevTriggerRef.current = !!triggerAnimation
+  }, [triggerAnimation, data, adjacencyList])
 
   // ── Animate ─────────────────────────────────────────────
   useFrame((state) => {
     if (!data || !particlesRef.current || !nodesRef.current || !edgeLinesRef.current) return
+    if (!adjacencyList || !nodeActivatedAtRef.current) return
 
     const time = state.clock.getElapsedTime()
     const dt = state.clock.getDelta()
     const { nodes, edges, regions } = data
+    const activatedAt = nodeActivatedAtRef.current
 
-    // Check if any region has real proficiency (above the 0.15 idle default)
-    const hasRealData = regions.some(
-      (r) => (proficiencyLevels?.[r.id] ?? 0) > 0.16
-    )
+    // ── Intro animation: blank → bright white → blank ──
+    if (introPhaseRef.current === 'idle' && time > 0.1) {
+      introPhaseRef.current = 'brightening'
+      introStartRef.current = time
+    }
+    let introFactor = 0 // 0 = normal idle, 1 = bright white
+    if (introPhaseRef.current === 'brightening') {
+      const elapsed = time - introStartRef.current
+      introFactor = Math.min(1, elapsed / INTRO_BRIGHTEN_DURATION)
+      if (introFactor >= 1) {
+        introPhaseRef.current = 'dimming'
+        introStartRef.current = time
+      }
+    } else if (introPhaseRef.current === 'dimming') {
+      const elapsed = time - introStartRef.current
+      introFactor = 1 - Math.min(1, elapsed / INTRO_DIM_DURATION)
+      if (introFactor <= 0) {
+        introPhaseRef.current = 'done'
+        introFactor = 0
+      }
+    }
+
+    // Set animation start time on first frame after BFS trigger
+    if (bfsActiveRef.current && animStartTimeRef.current < 0) {
+      animStartTimeRef.current = time
+      // Offset seeds that were set to 0
+      for (let i = 0; i < activatedAt.length; i++) {
+        if (activatedAt[i] === 0) activatedAt[i] = time
+      }
+    }
+
+    // ── BFS expansion: process a batch of frontier nodes ──
+    // Build set of regions with proficiency > 0 (used here and in node coloring)
+    const scoredRegionSet = new Set<number>()
+    regions.forEach((r, ri) => {
+      if ((proficiencyLevels?.[r.id] ?? 0) > 0) scoredRegionSet.add(ri)
+    })
+
+    if (bfsActiveRef.current && bfsQueueRef.current.length > 0) {
+      const queue = bfsQueueRef.current
+      const visited = bfsVisitedRef.current!
+      let expanded = 0
+
+      while (queue.length > 0 && expanded < BFS_NODES_PER_FRAME) {
+        const nodeIdx = queue.shift()!
+        expanded++
+
+        for (const neighbor of adjacencyList[nodeIdx]) {
+          if (visited[neighbor]) continue
+          // Only expand into nodes whose region has proficiency > 0
+          const neighborRegion = nodes[neighbor].region
+          if (!scoredRegionSet.has(neighborRegion)) continue
+          visited[neighbor] = 1
+          activatedAt[neighbor] = time
+          queue.push(neighbor)
+        }
+      }
+
+      // BFS finished when queue is empty
+      if (queue.length === 0) {
+        bfsActiveRef.current = false
+      }
+    }
+
+    // Check if any node has been activated (for idle vs active rendering)
+    const anyActivated = activatedAt.some((t: number) => t < Infinity)
+
     const whiteColor = new THREE.Color('#ffffff')
 
-    // Determine which region indices are "active"
+    // Determine which region indices are "active" (from external prop)
     const activeIdxSet = new Set<number>()
     if (activeRegions) {
       regions.forEach((r, i) => { if (activeRegions.has(r.id)) activeIdxSet.add(i) })
     }
     const anyActive = activeIdxSet.size > 0
 
-    // ── Update node colours & sizes based on activation ──
+    // ── Update node colours & sizes with per-node BFS activation ──
     const nCol = nodesRef.current.geometry.attributes.color as THREE.BufferAttribute
     const nSize = nodesRef.current.geometry.attributes.size as THREE.BufferAttribute
     const regionColors = regions.map((r) => new THREE.Color(r.color))
     const dimColor = new THREE.Color('#1a2a3a')
 
+    // Track per-region activation for labels
+    const regionActivatedCount: number[] = new Array(regions.length).fill(0)
+    const regionTotalCount: number[] = new Array(regions.length).fill(0)
+
     for (let i = 0; i < nodes.length; i++) {
       const ri = nodes[i].region
+      regionTotalCount[ri]++
+
       const active = !anyActive || activeIdxSet.has(ri)
       const hoverBright = hoveredRegion === ri
-      const proficiency = proficiencyLevels?.[regions[ri].id] ?? (anyActive && active ? 0.7 : 0.35)
-      const intensity = active ? proficiency : 0.08
+      const proficiency = proficiencyLevels?.[regions[ri].id] ?? 0
+      const regionHasScore = scoredRegionSet.has(ri)
 
-      let color: THREE.Color
-      if (!hasRealData) {
-        // Idle state: white outline
-        const pulse = Math.sin(time * 1.2 + i * 0.2) * 0.1 + 0.9
-        color = whiteColor.clone().multiplyScalar(0.35 * pulse)
-      } else if (active) {
-        color = regionColors[ri].clone()
-        const pulse = Math.sin(time * 2.0 + i * 0.3) * 0.15 + 0.85
-        color.multiplyScalar(intensity * pulse * (hoverBright ? 1.4 : 1.0))
-      } else {
-        color = dimColor.clone().multiplyScalar(intensity)
-      }
+      // Per-node activation factor: only count for scored regions
+      const nodeTime = activatedAt[i]
+      const activationT = (nodeTime < Infinity && regionHasScore)
+        ? Math.min(1, (time - nodeTime) / NODE_FADE_DURATION)
+        : 0
+
+      if (activationT > 0.01) regionActivatedCount[ri]++
+
+      // Idle color (white with subtle pulse)
+      const basePulse = Math.sin(time * 1.2 + i * 0.2) * 0.1 + 0.9
+      const idleColor = whiteColor.clone().multiplyScalar(0.35 * basePulse)
+
+      // Region color at full vibrancy (used for both intro & BFS)
+      const regionFullColor = regionColors[ri].clone()
+      const pulse = Math.sin(time * 2.0 + i * 0.3) * 0.15 + 0.85
+      regionFullColor.multiplyScalar(pulse * (hoverBright ? 1.4 : 1.0))
+
+      // BFS lerp factor: timing * proficiency — low proficiency stays mostly idle
+      const bfsLerp = activationT * proficiency
+
+      // Combine: intro shows full region colors, BFS shows proficiency-scaled colors
+      // effective lerp = max(introFactor, bfsLerp) so intro overrides when active
+      const effectiveLerp = Math.max(introFactor, bfsLerp)
+      const color = idleColor.clone().lerp(regionFullColor, effectiveLerp)
 
       nCol.array[i * 3] = color.r
       nCol.array[i * 3 + 1] = color.g
       nCol.array[i * 3 + 2] = color.b
 
-      // Size: bigger when active
-      if (!hasRealData) {
-        const sizePulse = Math.sin(time * 1.2 + i * 0.3) * 0.002 + 1
-        ;(nSize.array as Float32Array)[i] = 0.016 * sizePulse
-      } else {
-        const baseSize = active ? 0.022 + proficiency * 0.012 : 0.012
-        const sizePulse = active ? Math.sin(time * 1.5 + i * 0.5) * 0.003 + 1 : 1
-        ;(nSize.array as Float32Array)[i] = baseSize * sizePulse * (hoverBright ? 1.3 : 1.0)
-      }
+      // Size: scale by effective lerp
+      const idleSizePulse = Math.sin(time * 1.2 + i * 0.3) * 0.002 + 1
+      const idleSize = 0.016 * idleSizePulse
+      const activeBaseSize = 0.032
+      const activeSizePulse = Math.sin(time * 1.5 + i * 0.5) * 0.003 + 1
+      const activeSize = activeBaseSize * activeSizePulse * (hoverBright ? 1.3 : 1.0)
+      ;(nSize.array as Float32Array)[i] = idleSize + (activeSize - idleSize) * effectiveLerp
     }
     nCol.needsUpdate = true
     nSize.needsUpdate = true
 
-    // ── Update edge colours ───────────────────────────────
+    // Update label activation state (throttled to avoid excessive re-renders)
+    const newLabelActivation: Record<string, number> = {}
+    for (let ri = 0; ri < regions.length; ri++) {
+      const fraction = regionTotalCount[ri] > 0
+        ? regionActivatedCount[ri] / regionTotalCount[ri]
+        : 0
+      newLabelActivation[regions[ri].id] = fraction
+    }
+    // Only setState if values meaningfully changed
+    const shouldUpdate = regions.some((r) => {
+      const oldVal = Math.round((labelActivation[r.id] ?? 0) * 10)
+      const newVal = Math.round((newLabelActivation[r.id] ?? 0) * 10)
+      return oldVal !== newVal
+    })
+    if (shouldUpdate) setLabelActivation(newLabelActivation)
+
+    // ── Update edge colours with BFS activation ───────────
     const eCol = edgeLinesRef.current.geometry.attributes.color as THREE.BufferAttribute
+    const edgeWhite = 0.18
     for (let i = 0; i < edges.length; i++) {
       const [a, b] = edges[i]
       const ra = nodes[a].region, rb = nodes[b].region
 
-      if (!hasRealData) {
-        // Idle state: white edges
-        const edgeWhite = 0.18
-        eCol.array[i * 6 + 0] = edgeWhite; eCol.array[i * 6 + 1] = edgeWhite; eCol.array[i * 6 + 2] = edgeWhite
-        eCol.array[i * 6 + 3] = edgeWhite; eCol.array[i * 6 + 4] = edgeWhite; eCol.array[i * 6 + 5] = edgeWhite
-      } else {
-        const aActive = !anyActive || activeIdxSet.has(ra)
-        const bActive = !anyActive || activeIdxSet.has(rb)
-        const profA = proficiencyLevels?.[regions[ra].id] ?? (aActive ? 0.5 : 0.1)
-        const profB = proficiencyLevels?.[regions[rb].id] ?? (bActive ? 0.5 : 0.1)
+      // Edge BFS activation: only count endpoints in scored regions, scale by proficiency
+      const aScored = scoredRegionSet.has(ra)
+      const bScored = scoredRegionSet.has(rb)
+      const profA = proficiencyLevels?.[regions[ra].id] ?? 0
+      const profB = proficiencyLevels?.[regions[rb].id] ?? 0
+      const bfsTa = (activatedAt[a] < Infinity && aScored) ? Math.min(1, (time - activatedAt[a]) / NODE_FADE_DURATION) * profA : 0
+      const bfsTb = (activatedAt[b] < Infinity && bScored) ? Math.min(1, (time - activatedAt[b]) / NODE_FADE_DURATION) * profB : 0
+      const edgeBfsT = Math.min(bfsTa, bfsTb)
 
-        const ca = aActive ? regionColors[ra].clone().multiplyScalar(profA * 0.45) : dimColor.clone().multiplyScalar(0.08)
-        const cb = bActive ? regionColors[rb].clone().multiplyScalar(profB * 0.45) : dimColor.clone().multiplyScalar(0.08)
+      // Effective edge lerp: max of intro and BFS
+      const edgeT = Math.max(introFactor, edgeBfsT)
 
-        eCol.array[i * 6 + 0] = ca.r; eCol.array[i * 6 + 1] = ca.g; eCol.array[i * 6 + 2] = ca.b
-        eCol.array[i * 6 + 3] = cb.r; eCol.array[i * 6 + 4] = cb.g; eCol.array[i * 6 + 5] = cb.b
-      }
+      const edgeColorA = regionColors[ra].clone().multiplyScalar(0.5)
+      const edgeColorB = regionColors[rb].clone().multiplyScalar(0.5)
+
+      // Lerp from white to region color
+      eCol.array[i * 6 + 0] = edgeWhite + (edgeColorA.r - edgeWhite) * edgeT
+      eCol.array[i * 6 + 1] = edgeWhite + (edgeColorA.g - edgeWhite) * edgeT
+      eCol.array[i * 6 + 2] = edgeWhite + (edgeColorA.b - edgeWhite) * edgeT
+      eCol.array[i * 6 + 3] = edgeWhite + (edgeColorB.r - edgeWhite) * edgeT
+      eCol.array[i * 6 + 4] = edgeWhite + (edgeColorB.g - edgeWhite) * edgeT
+      eCol.array[i * 6 + 5] = edgeWhite + (edgeColorB.b - edgeWhite) * edgeT
     }
     eCol.needsUpdate = true
 
@@ -241,7 +503,6 @@ export default function LowPolyBrain({
       p.t += p.speed * dt
 
       if (p.t >= 1) {
-        // Hop to a connected edge
         const [, endNode] = edges[p.edgeIdx]
         const connected = edges.reduce<number[]>((acc, e, idx) => {
           if (e[0] === endNode || e[1] === endNode) acc.push(idx)
@@ -364,31 +625,36 @@ export default function LowPolyBrain({
         />
       </points>
 
-      {/* Persistent region labels — only when real data exists */}
-      {data.regions.some((r) => (proficiencyLevels?.[r.id] ?? 0) > 0.16) &&
-        data.regions.map((region) => (
-        <Html
-          key={region.id}
-          position={region.center}
-          center
-          distanceFactor={5}
-          style={{ pointerEvents: 'none' }}
-        >
-          <div
-            style={{
-              color: '#ffffff',
-              fontSize: '11px',
-              fontWeight: 600,
-              textShadow: `0 0 6px ${region.color}, 0 0 12px ${region.color}, 0 0 24px rgba(0,0,0,1)`,
-              whiteSpace: 'nowrap',
-              opacity: 0.9,
-              userSelect: 'none',
-            }}
+      {/* Region labels — fade in as BFS wave reaches each region */}
+      {data.regions.map((region) => {
+        const activation = labelActivation[region.id] ?? 0
+        if (activation < LABEL_ACTIVATION_THRESHOLD) return null
+        const opacity = Math.min(1, (activation - LABEL_ACTIVATION_THRESHOLD) / (1 - LABEL_ACTIVATION_THRESHOLD))
+        return (
+          <Html
+            key={region.id}
+            position={region.center}
+            center
+            distanceFactor={5}
+            style={{ pointerEvents: 'none' }}
           >
-            {region.label}
-          </div>
-        </Html>
-      ))}
+            <div
+              style={{
+                color: '#ffffff',
+                fontSize: '11px',
+                fontWeight: 600,
+                textShadow: `0 0 6px ${region.color}, 0 0 12px ${region.color}, 0 0 24px rgba(0,0,0,1)`,
+                whiteSpace: 'nowrap',
+                opacity: opacity * 0.9,
+                userSelect: 'none',
+                transition: 'opacity 0.3s ease',
+              }}
+            >
+              {region.label}
+            </div>
+          </Html>
+        )
+      })}
     </group>
   )
 }
