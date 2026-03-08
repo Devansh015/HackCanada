@@ -6,16 +6,21 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import LowPolyBrain from './LowPolyBrain'
 
-// ── Default proficiency levels (idle demo state) ──────────
-const DEMO_PROFICIENCY: Record<string, number> = {
-  Region_Frontend:  0.5,
-  Region_Product:   0.35,
-  Region_Backend:   0.6,
-  Region_Systems:   0.3,
-  Region_AI:        0.55,
-  Region_Data:      0.4,
-  Region_DevOps:    0.45,
-  Region_Hackathon: 0.5,
+// ── Default proficiency levels (fallback when no data) ──────────
+const DEFAULT_PROFICIENCY: Record<string, number> = {
+  Region_Frontend:  0.15,
+  Region_Product:   0.15,
+  Region_Backend:   0.15,
+  Region_Systems:   0.15,
+  Region_AI:        0.15,
+  Region_Data:      0.15,
+  Region_DevOps:    0.15,
+  Region_Hackathon: 0.15,
+}
+
+export interface BrainSceneProps {
+  proficiencyLevels?: Record<string, number>
+  onRegionClick?: (regionId: string) => void
 }
 
 function Scene({
@@ -69,8 +74,23 @@ function Scene({
   )
 }
 
-export default function BrainScene() {
+export default function BrainScene({ 
+  proficiencyLevels,
+  onRegionClick: externalOnRegionClick,
+}: BrainSceneProps = {}) {
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null)
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
+
+  // Track mouse position for tooltip
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    setMousePos({ x: e.clientX, y: e.clientY })
+  }, [])
+
+  // Merge provided proficiency with defaults
+  const mergedProficiency = useMemo(() => ({
+    ...DEFAULT_PROFICIENCY,
+    ...proficiencyLevels,
+  }), [proficiencyLevels])
 
   // In idle / demo mode, no specific set of active regions — all glow at base level
   // When a region is hovered, highlight that region
@@ -85,10 +105,11 @@ export default function BrainScene() {
 
   const handleRegionClick = useCallback((id: string) => {
     console.log('Region clicked:', id)
-  }, [])
+    externalOnRegionClick?.(id)
+  }, [externalOnRegionClick])
 
   return (
-    <div className="canvas-container">
+    <div className="canvas-container" onMouseMove={handleMouseMove}>
       <Canvas
         gl={{
           antialias: true,
@@ -99,15 +120,21 @@ export default function BrainScene() {
       >
         <Scene
           activeRegions={activeRegions}
-          proficiencyLevels={DEMO_PROFICIENCY}
+          proficiencyLevels={mergedProficiency}
           onRegionHover={handleRegionHover}
           onRegionClick={handleRegionClick}
         />
       </Canvas>
 
-      {/* Region label tooltip */}
+      {/* Region label tooltip - follows cursor */}
       {hoveredRegion && (
-        <div className="absolute top-6 right-6 bg-black/60 border border-white/10 rounded-lg px-4 py-2 text-white/80 text-sm font-medium backdrop-blur-sm pointer-events-none">
+        <div 
+          className="fixed bg-black/80 border border-white/20 rounded-lg px-3 py-1.5 text-white text-sm font-medium backdrop-blur-sm pointer-events-none z-50"
+          style={{
+            left: mousePos.x + 15,
+            top: mousePos.y + 15,
+          }}
+        >
           {hoveredRegion.replace('Region_', '')}
         </div>
       )}
