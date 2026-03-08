@@ -15,6 +15,7 @@ Environment
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -38,61 +39,50 @@ logger = logging.getLogger(__name__)
 #  Configuration
 # ────────────────────────────────────────────────────────────
 
-GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+# Prefer the Google Cloud Console key (billing-enabled)
+GEMINI_API_KEY: str = os.getenv("GOOGLE_CLOUD_CONSOLE_API_KEY", "")
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-MAX_CONTENT_CHARS: int = 12_000   # Trim very long uploads to save tokens
+MAX_CONTENT_CHARS: int = 6_000    # Trimmed from 12K → 6K to halve input tokens
+
+# ── Token tracking ────────────────────────────────────────
+total_gemini_tokens: int = 0       # Cumulative tokens across all calls this run
+total_gemini_calls: int = 0        # Number of actual API calls made
+
+# ── Response cache (hash → GeminiScoringResult) ───────────
+_score_cache: Dict[str, GeminiScoringResult] = {}
+
+def get_token_stats() -> Dict[str, int]:
+    """Return cumulative token/call stats for the current process."""
+    return {"total_tokens": total_gemini_tokens, "total_calls": total_gemini_calls}
+
+def reset_token_stats() -> None:
+    """Reset counters (useful at start of a profiling run)."""
+    global total_gemini_tokens, total_gemini_calls
+    total_gemini_tokens = 0
+    total_gemini_calls = 0
+    _score_cache.clear()
 
 
 # ────────────────────────────────────────────────────────────
 #  Prompt template
 # ────────────────────────────────────────────────────────────
 
-_CATEGORY_LIST_STR = "\n".join(
-    f'  "{key}": "{label}"' for key, label in CATEGORY_MAP.items()
-)
+# ────────────────────────────────────────────────────────────
+#  Prompt template  (compact — saves ~60% input tokens)
+# ────────────────────────────────────────────────────────────
 
-SCORING_PROMPT_TEMPLATE = """You are an expert computer-science educator.
+# Just the keys, no labels — Gemini knows what they mean
+_CATEGORY_KEYS_STR = ", ".join(CATEGORY_KEYS)
 
-Analyse the following user-uploaded content and estimate how strongly it
-demonstrates knowledge, familiarity, or experience with **each** of the
-technical categories listed below.
+SCORING_PROMPT_TEMPLATE = """Score this content's relevance to CS categories.
+Categories: {categories}
 
-### Categories (key → label)
-{categories}
+Scale: 0.0=none, 0.3=mentioned, 0.6=demonstrated, 1.0=expert.
+Only include categories scoring >0. Return compact JSON:
+{{"s":{{"key":float,...}}}}
 
-### Instructions
-1. For EVERY category, assign a relevance score from 0.0 to 1.0:
-   - 0.0 = no evidence at all
-   - 0.3 = slight or indirect mention
-   - 0.6 = clear evidence of understanding
-   - 0.9-1.0 = deep, hands-on expertise demonstrated
-2. For each category that scores **0.3 or higher**, write one short
-   sentence explaining why.
-3. Write a 1–2 sentence overall summary of what this content tells us
-   about the user's technical knowledge.
-
-### Content to analyse
-\"\"\"
-{content}
-\"\"\"
-
-### Required JSON output
-Return ONLY valid JSON (no markdown fences, no commentary) in this
-exact schema:
-
-{{
-  "scores": {{
-    "variables": <float>,
-    "functions": <float>,
-    ... (every category key)
-  }},
-  "explanations": {{
-    "variables": "<reason or empty string>",
-    ...
-  }},
-  "overall_summary": "<1-2 sentence summary>"
-}}
-"""
+Content:
+{content}"""
 
 
 # ────────────────────────────────────────────────────────────
@@ -139,16 +129,26 @@ def score_content_with_gemini(
 
     trimmed = content[:MAX_CONTENT_CHARS]
 
+    # ── Cache check (avoid re-scoring identical content) ────
+    content_hash = hashlib.md5(trimmed.encode()).hexdigest()
+    if content_hash in _score_cache:
+        logger.info("Cache hit – skipping Gemini call")
+        return _score_cache[content_hash]
+
     prompt = SCORING_PROMPT_TEMPLATE.format(
-        categories=_CATEGORY_LIST_STR,
+        categories=_CATEGORY_KEYS_STR,
         content=trimmed,
     )
 
     try:
+        global total_gemini_tokens, total_gemini_calls
         raw_text, token_count = _call_gemini(prompt, key, mdl)
+        total_gemini_tokens += token_count
+        total_gemini_calls += 1
         result = _parse_gemini_response(raw_text)
         result.model_used = mdl
         result.token_count = token_count
+        _score_cache[content_hash] = result
         return result
 
     except Exception as exc:
@@ -177,7 +177,7 @@ def _call_gemini(prompt: str, api_key: str, model: str) -> tuple[str, int]:
         contents=prompt,
         config=genai.types.GenerateContentConfig(
             temperature=0.1,          # Keep output deterministic
-            max_output_tokens=4096,
+            max_output_tokens=4096,   # 2.5-flash uses thinking tokens internally
             response_mime_type="application/json",
         ),
     )
@@ -194,6 +194,32 @@ def _call_gemini(prompt: str, api_key: str, model: str) -> tuple[str, int]:
 #  Response parsing
 # ────────────────────────────────────────────────────────────
 
+def _repair_truncated_json(raw: str) -> Optional[dict]:
+    """
+    Attempt to recover scores from truncated JSON like:
+      {"s":{"git":1.0,"testing":0.6,"oop":0
+    Strategy: find all complete "key":value pairs, ignore the rest.
+    """
+    # Try progressively stripping trailing chars and closing brackets
+    for trim in range(min(len(raw), 60)):
+        candidate = raw[: len(raw) - trim]
+        # Remove any trailing partial key or value
+        candidate = re.sub(r',\s*"[^"]*$', "", candidate)   # trailing partial key
+        candidate = re.sub(r',\s*$', "", candidate)           # trailing comma
+
+        # Count open/close braces and brackets, close what's needed
+        opens = candidate.count("{") - candidate.count("}")
+        candidate += "}" * max(opens, 0)
+        opens_b = candidate.count("[") - candidate.count("]")
+        candidate += "]" * max(opens_b, 0)
+
+        try:
+            data = json.loads(candidate)
+            return data
+        except json.JSONDecodeError:
+            continue
+    return None
+
 def _parse_gemini_response(raw: str) -> GeminiScoringResult:
     """Parse the JSON Gemini returns into a GeminiScoringResult."""
     # Strip markdown code fences if Gemini wraps anyway
@@ -202,15 +228,19 @@ def _parse_gemini_response(raw: str) -> GeminiScoringResult:
 
     try:
         data = json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        logger.error(f"Gemini returned invalid JSON: {e}\nRaw: {raw[:500]}")
-        return GeminiScoringResult(
-            scores=zero_scores(),
-            overall_summary="Failed to parse Gemini response.",
-        )
+    except json.JSONDecodeError:
+        # Gemini 2.5 often truncates JSON — try to repair it
+        data = _repair_truncated_json(cleaned)
+        if data is None:
+            logger.error(f"Gemini returned unrepairable JSON\nRaw: {raw[:300]}")
+            return GeminiScoringResult(
+                scores=zero_scores(),
+                overall_summary="Failed to parse Gemini response.",
+            )
+        logger.info(f"Repaired truncated JSON — recovered {len(data.get('s', data.get('scores', {})))} scores")
 
-    # Extract scores – clamp to [0, 1]
-    raw_scores = data.get("scores", {})
+    # Support both compact {"s": {...}} and legacy {"scores": {...}} formats
+    raw_scores = data.get("s", data.get("scores", {}))
     scores: Dict[str, float] = {}
     for key in CATEGORY_KEYS:
         val = raw_scores.get(key, 0.0)
@@ -220,14 +250,14 @@ def _parse_gemini_response(raw: str) -> GeminiScoringResult:
             scores[key] = 0.0
 
     explanations = {
-        k: str(v) for k, v in data.get("explanations", {}).items()
+        k: str(v) for k, v in data.get("explanations", data.get("e", {})).items()
         if k in CATEGORY_KEYS
     }
 
     return GeminiScoringResult(
         scores=scores,
         explanations=explanations,
-        overall_summary=data.get("overall_summary", ""),
+        overall_summary=data.get("overall_summary", data.get("sum", "")),
     )
 
 

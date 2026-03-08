@@ -43,3 +43,4 @@ __pycache__/
 
 # Backend test data
 backend/ingestion/test_cases/
+backend/profile_scoring/build_yash_profile.py
