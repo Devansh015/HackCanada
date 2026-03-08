@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 
 # Make sure we can import from the project root
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
 os.chdir(ROOT)

@@ -39,7 +39,7 @@ from .models import (
 # Load .env from project root
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 except ImportError:
     pass
 
@@ -80,91 +80,109 @@ def _tier_label(score: float) -> str:
 
 
 def _profile_snapshot(profile: UserProfile) -> str:
-    """Build a concise textual summary of a user's profile for the prompt."""
+    """Build a concise textual summary of a user's profile for the prompt.
+
+    Only tier labels are included – numeric scores are deliberately
+    omitted so Gemini never quotes them back to the user.
+    """
     lines: List[str] = []
 
     # Group scores by region
     groups: Dict[str, List[tuple]] = {}
     for key in CATEGORY_KEYS:
         group = CATEGORY_GROUPS[key]
-        score = round(profile.category_scores.get(key, 0.0), 3)
+        score = profile.category_scores.get(key, 0.0)
         tier = _tier_label(score)
         groups.setdefault(group, []).append(
-            (CATEGORY_MAP[key], score, tier)
+            (CATEGORY_MAP[key], tier)
         )
 
     for group_name, cats in groups.items():
-        avg = sum(s for _, s, _ in cats) / len(cats) if cats else 0.0
+        avg = sum(
+            profile.category_scores.get(k, 0.0)
+            for k in CATEGORY_KEYS if CATEGORY_GROUPS[k] == group_name
+        ) / max(len(cats), 1)
         region_tier = _tier_label(avg)
         cat_details = ", ".join(
-            f"{name}={score} [{tier}]" for name, score, tier in cats
+            f"{name}: {tier}" for name, tier in cats
         )
         lines.append(
-            f"  {group_name} (avg {avg:.2f} [{region_tier}]): {cat_details}"
+            f"  {group_name} (overall {region_tier}): {cat_details}"
         )
 
     top = profile.get_top_categories(5)
     top_str = ", ".join(
-        f"{t['category']}={t['score']} [{_tier_label(t['score'])}]"
+        f"{t['category']}: {_tier_label(t['score'])}"
         for t in top
     )
 
     return (
         f"Upload count: {profile.upload_count}\n"
         f"Top-5: {top_str}\n"
-        f"Scores by region:\n" + "\n".join(lines)
+        f"Skills by region:\n" + "\n".join(lines)
     )
+
+
+def _upload_history_summary(user_id: str) -> str:
+    """Build a short summary of the user's uploaded projects/content."""
+    history = get_upload_history(user_id)
+    if not history:
+        return "No uploads yet."
+
+    lines: List[str] = []
+    for i, snap in enumerate(history[-10:], 1):  # last 10 uploads
+        source = snap.source_type.replace("_", " ").title()
+        preview = snap.content_preview.strip()[:150]
+        # Find top categories this upload contributed to
+        top_cats = sorted(
+            snap.upload_scores.items(), key=lambda kv: kv[1], reverse=True
+        )[:3]
+        cat_str = ", ".join(
+            f"{CATEGORY_MAP.get(k, k)}: {_tier_label(v)}"
+            for k, v in top_cats if v > 0.0
+        )
+        line = f"  {i}. [{source}] {preview}"
+        if cat_str:
+            line += f" — strongest in: {cat_str}"
+        lines.append(line)
+
+    return "\n".join(lines)
 
 
 def _build_system_prompt(profile: UserProfile) -> str:
     """Construct the system prompt that grounds the chatbot in the user's data."""
     snapshot = _profile_snapshot(profile)
+    uploads = _upload_history_summary(profile.user_id)
 
-    return f"""You are **Lumas**, a friendly and knowledgeable CS learning advisor.
+    return f"""You are Cortex, a friendly and concise CS learning advisor.
 
-You have access to the user's Knowledge Map – a living profile of their
-technical skills across {len(CATEGORY_KEYS)} categories grouped into 9 regions
-(Fundamentals, OOP, Data Structures, Algorithms, Systems, Frontend,
-Dev Practices, Product, Hackathon).
-
-─── PROFICIENCY RUBRIC ───
-Each category has a score from 0.0 to 1.0.  Use the tier labels below
-when describing the user's abilities — never just quote a raw number.
-
-  0.00           → **Unassessed**  — no evidence uploaded yet; do NOT
-                    assume the user is weak here, they simply haven't
-                    shown this skill yet.
-  0.01 – 0.15    → **Novice**      — minimal exposure; just getting started.
-  0.16 – 0.35    → **Beginner**    — some familiarity; understands basics
-                    but needs guided practice.
-  0.36 – 0.55    → **Intermediate** — working knowledge; can apply concepts
-                    in small projects with occasional guidance.
-  0.56 – 0.75    → **Proficient**  — solid competence; can work independently
-                    and tackle moderately complex problems.
-  0.76 – 0.90    → **Advanced**    — strong expertise; comfortable with
-                    edge-cases, optimisation, and mentoring others.
-  0.91 – 1.00    → **Expert**      — exceptional mastery; deep understanding,
-                    can architect solutions and contribute to the field.
-───────────────────────────
+You know the user's Knowledge Map which rates their skills using these
+levels: Unassessed, Novice, Beginner, Intermediate, Proficient, Advanced,
+Expert.
 
 ─── CURRENT PROFILE ───
 {snapshot}
 ────────────────────────
 
-Guidelines:
-1. **Be encouraging** – celebrate strengths before pointing out gaps.
-2. **Use tier names** – say "you're at a *Proficient* level in Sorting"
-   rather than "your Sorting score is 0.62".  You may mention the
-   numeric score in parentheses for precision, but lead with the tier.
-3. **Be specific** – reference actual category names and regions.
-4. **Suggest concrete next steps** – courses, projects, exercises.
-5. **Stay concise** – prefer short paragraphs and bullet points.
-6. **If the user asks about something outside CS**, gently redirect.
-7. When the user has very few uploads, acknowledge that the profile is
-   still forming and recommend uploading more content for better insights.
-8. For **Unassessed** categories, say the skill hasn't been evaluated yet
-   rather than calling it a weakness.
-9. You may use Markdown formatting in your replies.
+─── UPLOADED PROJECTS / CONTENT ───
+{uploads}
+────────────────────────────────────
+
+Rules (follow strictly):
+1. Keep every reply to 3-4 sentences max. Be direct and helpful.
+2. NEVER mention or reveal any numeric score, percentage, or number
+   between 0 and 1. Only use the level names (Novice, Beginner, etc.).
+3. NEVER use XML-style tags, HTML tags, or any bracket-based markup
+   in your replies. Plain text and simple markdown only.
+4. Be encouraging – highlight strengths before gaps.
+5. Use the level names naturally, e.g. "You're at an Intermediate level
+   in Sorting" – never say "your score is 0.5".
+6. For Unassessed categories, say the skill hasn't been evaluated yet,
+   not that it's a weakness.
+7. When the user has few uploads, suggest uploading more content.
+8. If asked about something outside CS, gently redirect.
+9. When relevant, reference the user's actual projects or uploads by
+   name/description to make advice concrete and personal.
 """
 
 
@@ -225,7 +243,7 @@ def chat_with_profile(
             config={
                 "system_instruction": system_prompt,
                 "temperature": 0.7,
-                "max_output_tokens": 1024,
+                "max_output_tokens": 800,
             },
         )
         reply_text = response.text or "I'm sorry, I couldn't generate a response."

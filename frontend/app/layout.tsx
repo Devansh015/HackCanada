@@ -3,7 +3,7 @@ import './globals.css'
 import { ProfileProvider } from '@/context/ProfileContext'
 
 export const metadata: Metadata = {
-  title: 'Lumas | Neural Intelligence',
+  title: 'Cortex | Neural Intelligence',
   description: 'A living neural network visualization powered by advanced AI',
 }
 

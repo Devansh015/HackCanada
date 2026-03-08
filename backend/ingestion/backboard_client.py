@@ -21,7 +21,7 @@ from pathlib import Path as _EnvPath
 # Load .env from project root
 try:
     from dotenv import load_dotenv
-    load_dotenv(_EnvPath(__file__).resolve().parents[2] / ".env")
+    load_dotenv(_EnvPath(__file__).resolve().parents[3] / ".env")
 except ImportError:
     pass
 

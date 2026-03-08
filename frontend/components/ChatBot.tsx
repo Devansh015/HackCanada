@@ -69,7 +69,7 @@ export default function ChatBot({ onPanelToggle }: ChatBotProps) {
         {/* Header */}
         <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
           <div>
-            <h3 className="text-white font-semibold text-sm">LUMAS AI</h3>
+            <h3 className="text-white font-semibold text-sm">CORTEX AI</h3>
             <p className="text-white/40 text-xs mt-0.5">Skills &amp; learning insights</p>
           </div>
           <button
@@ -114,7 +114,7 @@ export default function ChatBot({ onPanelToggle }: ChatBotProps) {
 
         {/* Suggestion Chips */}
         {suggestions.length > 0 && (
-          <div className="px-4 pb-3 flex flex-wrap gap-1.5 border-t border-white/5 pt-3">
+          <div className="px-4 pb-3 flex flex-wrap justify-center gap-1.5 border-t border-white/5 pt-3">
             {suggestions.map((s, i) => (
               <button
                 key={i}
@@ -139,7 +139,7 @@ export default function ChatBot({ onPanelToggle }: ChatBotProps) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={profile ? 'Ask LUMAS about your skills...' : 'Upload a project first'}
+            placeholder={profile ? 'Ask CORTEX about your skills...' : 'Upload a project first'}
             disabled={!profile || isTyping}
             className="flex-1 bg-transparent text-sm text-white placeholder-white/30 outline-none disabled:opacity-40"
           />

@@ -68,7 +68,7 @@ export default function Home() {
         {/* Header */}
         <header className="flex items-center justify-between pointer-events-auto">
           <div className="text-white/90 font-semibold text-xl tracking-tight">
-            LUMAS
+            CORTEX
           </div>
           <div className={`flex items-center gap-3 transition-all duration-300 ${chatPanelOpen ? 'mr-[396px]' : ''}`}>
             <button
@@ -98,7 +98,7 @@ export default function Home() {
         {/* Footer */}
         <footer className="flex items-end justify-between pointer-events-auto">
           <div className="text-white/30 text-xs">
-            © 2026 Lumas
+            © 2026 Cortex
           </div>
         </footer>
       </div>

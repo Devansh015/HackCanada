@@ -1,5 +1,5 @@
 /**
- * API client for Lumas backend
+ * API client for Cortex backend
  */
 
 import type {
@@ -139,11 +139,11 @@ export function generateUserId(): string {
 export function getStoredUserId(): string {
   if (typeof window === 'undefined') return generateUserId()
   
-  const stored = localStorage.getItem('lumas_user_id')
+  const stored = localStorage.getItem('cortex_user_id')
   if (stored) return stored
   
   const newId = generateUserId()
-  localStorage.setItem('lumas_user_id', newId)
+  localStorage.setItem('cortex_user_id', newId)
   return newId
 }
 

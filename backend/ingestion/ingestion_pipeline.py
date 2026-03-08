@@ -10,7 +10,7 @@ import logging
 
 # Load .env from project root
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 from .input_detector import detect_input_type
 from .text_processor import TextPromptProcessor

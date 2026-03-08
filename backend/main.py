@@ -1,8 +1,12 @@
 """
-FastAPI application entry point for Lumas backend.
+FastAPI application entry point for Cortex backend.
 
 Run with: uvicorn backend.main:app --reload --port 8000
 """
+
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,8 +15,8 @@ from backend.chatbot.router import router as chat_router
 from backend.profile_scoring.router import router as profile_router
 
 app = FastAPI(
-    title="Lumas API",
-    description="Backend API for Lumas knowledge visualization",
+    title="Cortex API",
+    description="Backend API for Cortex knowledge visualization",
     version="1.0.0",
 )
 
@@ -37,7 +41,7 @@ app.include_router(chat_router, prefix="/api")
 
 @app.get("/")
 async def root():
-    return {"message": "Lumas API", "version": "1.0.0"}
+    return {"message": "Cortex API", "version": "1.0.0"}
 
 @app.get("/health")
 async def health_check():
