@@ -135,6 +135,8 @@ export const REGION_TO_CATEGORIES: Record<FrontendRegion, BackendCategory[]> =
  * Uses top-3 average per region (avoids dilution in large groups).
  * Regions with no scored categories are omitted (stays dark).
  */
+const TOP_N = 3
+
 export function aggregateToRegions(
   categoryScores: Record<string, number>
 ): Record<FrontendRegion, number> {
