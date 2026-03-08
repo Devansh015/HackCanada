@@ -172,14 +172,26 @@ def _call_gemini(prompt: str, api_key: str, model: str) -> tuple[str, int]:
 
     client = genai.Client(api_key=api_key)
 
+    # Build config — disable thinking for 2.5 models (saves ~5-8s per call)
+    config_kwargs = dict(
+        temperature=0.0,
+        max_output_tokens=2048,
+        response_mime_type="application/json",
+    )
+
+    # Gemini 2.5 models support thinking budget — set to 0 to skip thinking
+    if "2.5" in model:
+        try:
+            config_kwargs["thinking_config"] = genai.types.ThinkingConfig(
+                thinking_budget=0
+            )
+        except (AttributeError, TypeError):
+            pass  # Older SDK versions may not support this
+
     response = client.models.generate_content(
         model=model,
         contents=prompt,
-        config=genai.types.GenerateContentConfig(
-            temperature=0.1,          # Keep output deterministic
-            max_output_tokens=4096,   # 2.5-flash uses thinking tokens internally
-            response_mime_type="application/json",
-        ),
+        config=genai.types.GenerateContentConfig(**config_kwargs),
     )
 
     text = response.text or ""
