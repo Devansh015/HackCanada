@@ -54,6 +54,12 @@ body {
 }
 
 .hero-content > * {
+  pointer-events: none;
+}
+
+.hero-content a,
+.hero-content button,
+.hero-content nav {
   pointer-events: auto;
 }
 

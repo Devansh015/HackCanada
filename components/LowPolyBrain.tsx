@@ -1,383 +1,342 @@
 'use client'
 
-import { useRef, useMemo, useState } from 'react'
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
-interface BrainNodeData {
-  position: THREE.Vector3
-  strength: number
-  baseStrength: number
-  phase: number
+// ── Types ─────────────────────────────────────────────────
+interface RegionData {
+  id: string
+  label: string
+  color: string
+  nodeCount: number
+  nodeIds: number[]
+  center: [number, number, number]
 }
 
-// Generate brain-like low-poly mesh vertices
-function generateBrainGeometry() {
-  const vertices: number[] = []
-  const indices: number[] = []
-  const nodePositions: THREE.Vector3[] = []
-
-  // Brain shape parameters
-  const leftHemisphere = generateHemisphere(-0.3, 1)
-  const rightHemisphere = generateHemisphere(0.3, 1)
-  
-  // Combine hemispheres
-  const allPoints = [...leftHemisphere, ...rightHemisphere]
-  
-  // Generate brain stem
-  const stemPoints = generateBrainStem()
-  allPoints.push(...stemPoints)
-  
-  // Add some randomness to create organic feel
-  allPoints.forEach(p => {
-    p.x += (Math.random() - 0.5) * 0.05
-    p.y += (Math.random() - 0.5) * 0.05
-    p.z += (Math.random() - 0.5) * 0.05
-  })
-
-  // Store node positions
-  allPoints.forEach(p => nodePositions.push(p.clone()))
-
-  // Create vertices array
-  allPoints.forEach(p => {
-    vertices.push(p.x, p.y, p.z)
-  })
-
-  // Generate faces using Delaunay-like triangulation (simplified)
-  const tempIndices = triangulatePoints(allPoints)
-  indices.push(...tempIndices)
-
-  return { vertices, indices, nodePositions }
+interface NodeData {
+  id: number
+  position: [number, number, number]
+  region: number
 }
 
-function generateHemisphere(xOffset: number, scale: number): THREE.Vector3[] {
-  const points: THREE.Vector3[] = []
-  
-  // Create brain hemisphere shape
-  const layers = 8
-  const pointsPerLayer = 10
-  
-  for (let layer = 0; layer < layers; layer++) {
-    const t = layer / (layers - 1)
-    const y = (t - 0.5) * 1.6 // Height
-    
-    // Brain shape profile (wider at top, narrower at bottom)
-    const profileRadius = Math.sin(t * Math.PI) * 0.6 + 0.2
-    const brainWidthMod = 1 - Math.pow(Math.abs(t - 0.4), 2) * 0.5
-    
-    for (let i = 0; i < pointsPerLayer; i++) {
-      const angle = (i / pointsPerLayer) * Math.PI * 2
-      
-      // Create asymmetric brain shape
-      let r = profileRadius * brainWidthMod
-      
-      // Add bumps for brain folds
-      r += Math.sin(angle * 3 + layer) * 0.08
-      r += Math.sin(angle * 5 - layer * 0.5) * 0.05
-      
-      // Front-back asymmetry (brain is longer front to back)
-      const fbMod = 1 + Math.cos(angle) * 0.2
-      
-      const x = Math.cos(angle) * r * fbMod * scale + xOffset
-      const z = Math.sin(angle) * r * scale * 0.9
-      
-      points.push(new THREE.Vector3(x, y * scale, z))
-    }
-  }
-  
-  // Add central points for better mesh
-  points.push(new THREE.Vector3(xOffset, 0.8 * scale, 0)) // Top
-  points.push(new THREE.Vector3(xOffset, -0.6 * scale, 0)) // Bottom
-  
-  return points
+interface BrainData {
+  meta: { totalNodes: number; totalEdges: number }
+  regions: RegionData[]
+  nodes: NodeData[]
+  edges: [number, number][]
+  interRegionPaths: [number, number][]
 }
 
-function generateBrainStem(): THREE.Vector3[] {
-  const points: THREE.Vector3[] = []
-  
-  // Brain stem at the bottom
-  const stemLayers = 4
-  const pointsPerLayer = 6
-  
-  for (let layer = 0; layer < stemLayers; layer++) {
-    const t = layer / (stemLayers - 1)
-    const y = -0.6 - t * 0.5
-    const r = 0.15 - t * 0.05
-    
-    for (let i = 0; i < pointsPerLayer; i++) {
-      const angle = (i / pointsPerLayer) * Math.PI * 2
-      const x = Math.cos(angle) * r
-      const z = Math.sin(angle) * r - 0.1
-      points.push(new THREE.Vector3(x, y, z))
-    }
-  }
-  
-  // Bottom point
-  points.push(new THREE.Vector3(0, -1.2, -0.1))
-  
-  return points
+// ── Particle system for signal travel ─────────────────────
+const PARTICLE_COUNT = 150
+
+interface Particle {
+  edgeIdx: number
+  t: number
+  speed: number
+  regionSource: number
 }
 
-function triangulatePoints(points: THREE.Vector3[]): number[] {
-  const indices: number[] = []
-  const n = points.length
-  
-  // Create triangles by connecting nearby points
-  for (let i = 0; i < n; i++) {
-    const distances: { index: number; dist: number }[] = []
-    
-    for (let j = 0; j < n; j++) {
-      if (i !== j) {
-        const dist = points[i].distanceTo(points[j])
-        distances.push({ index: j, dist })
-      }
-    }
-    
-    // Sort by distance and connect to nearest neighbors
-    distances.sort((a, b) => a.dist - b.dist)
-    
-    // Create triangles with nearby points
-    for (let k = 0; k < Math.min(6, distances.length - 1); k++) {
-      const j = distances[k].index
-      const l = distances[k + 1].index
-      
-      // Check if this triangle would be reasonable
-      const d1 = points[i].distanceTo(points[j])
-      const d2 = points[j].distanceTo(points[l])
-      const d3 = points[l].distanceTo(points[i])
-      
-      const maxDist = 0.6
-      if (d1 < maxDist && d2 < maxDist && d3 < maxDist) {
-        // Ensure consistent winding order
-        const normal = new THREE.Vector3()
-        const v1 = new THREE.Vector3().subVectors(points[j], points[i])
-        const v2 = new THREE.Vector3().subVectors(points[l], points[i])
-        normal.crossVectors(v1, v2)
-        
-        const center = new THREE.Vector3().addVectors(points[i], points[j]).add(points[l]).multiplyScalar(1/3)
-        
-        if (normal.dot(center) > 0) {
-          indices.push(i, j, l)
-        } else {
-          indices.push(i, l, j)
-        }
-      }
-    }
-  }
-  
-  return indices
-}
+// ── Component ─────────────────────────────────────────────
 
 interface LowPolyBrainProps {
-  hovered: boolean
+  activeRegions?: Set<string>
+  proficiencyLevels?: Record<string, number>   // 0–1 per region id
+  onRegionHover?: (regionId: string | null) => void
+  onRegionClick?: (regionId: string) => void
 }
 
-export default function LowPolyBrain({ hovered }: LowPolyBrainProps) {
-  const meshRef = useRef<THREE.Mesh>(null)
-  const wireframeRef = useRef<THREE.LineSegments>(null)
+export default function LowPolyBrain({
+  activeRegions,
+  proficiencyLevels,
+  onRegionHover,
+  onRegionClick,
+}: LowPolyBrainProps) {
+  const groupRef = useRef<THREE.Group>(null)
+  const edgeLinesRef = useRef<THREE.LineSegments>(null)
   const nodesRef = useRef<THREE.Points>(null)
-  const glowNodesRef = useRef<THREE.Points>(null)
-  
-  // Generate geometry once
-  const { geometry, wireframeGeometry, nodeData, nodeGeometry, glowNodeGeometry } = useMemo(() => {
-    const { vertices, indices, nodePositions } = generateBrainGeometry()
-    
-    // Create main geometry
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
-    geo.setIndex(indices)
-    geo.computeVertexNormals()
-    
-    // Create wireframe geometry
-    const wireGeo = new THREE.WireframeGeometry(geo)
-    
-    // Create node data with random strengths
-    const nodes: BrainNodeData[] = nodePositions.map((pos, i) => ({
-      position: pos,
-      strength: Math.random(),
-      baseStrength: 0.3 + Math.random() * 0.7,
-      phase: Math.random() * Math.PI * 2
-    }))
-    
-    // Create points geometry for nodes
-    const nodePositionsArray = new Float32Array(nodes.length * 3)
-    const nodeSizes = new Float32Array(nodes.length)
-    const nodeStrengths = new Float32Array(nodes.length)
-    
-    nodes.forEach((node, i) => {
-      nodePositionsArray[i * 3] = node.position.x
-      nodePositionsArray[i * 3 + 1] = node.position.y
-      nodePositionsArray[i * 3 + 2] = node.position.z
-      nodeSizes[i] = 1.5 + node.baseStrength * 2
-      nodeStrengths[i] = node.baseStrength
-    })
-    
-    const nodeGeo = new THREE.BufferGeometry()
-    nodeGeo.setAttribute('position', new THREE.Float32BufferAttribute(nodePositionsArray, 3))
-    nodeGeo.setAttribute('size', new THREE.Float32BufferAttribute(nodeSizes, 1))
-    nodeGeo.setAttribute('strength', new THREE.Float32BufferAttribute(nodeStrengths, 1))
-    
-    // Glow nodes (larger, more transparent)
-    const glowGeo = new THREE.BufferGeometry()
-    glowGeo.setAttribute('position', new THREE.Float32BufferAttribute(nodePositionsArray, 3))
-    glowGeo.setAttribute('size', new THREE.Float32BufferAttribute(nodeSizes.map(s => s * 1.8), 1))
-    glowGeo.setAttribute('strength', new THREE.Float32BufferAttribute(nodeStrengths, 1))
-    
-    return {
-      geometry: geo,
-      wireframeGeometry: wireGeo,
-      nodeData: nodes,
-      nodeGeometry: nodeGeo,
-      glowNodeGeometry: glowGeo
-    }
+  const particlesRef = useRef<THREE.Points>(null)
+  const [data, setData] = useState<BrainData | null>(null)
+  const [hoveredRegion, setHoveredRegion] = useState<number | null>(null)
+
+  // Load brain region data
+  useEffect(() => {
+    fetch('/brain_regions.json')
+      .then((r) => r.json())
+      .then((d: BrainData) => setData(d))
   }, [])
-  
-  // Animation
+
+  // ── Build geometries from data ──────────────────────────
+  const {
+    edgeGeometry,
+    edgeColors,
+    nodePositions,
+    nodeColors,
+    nodeSizes,
+    nodeRegionIds,
+    particlePositions,
+    particlesData,
+  } = useMemo(() => {
+    if (!data) return {} as any
+
+    const { nodes, edges, regions } = data
+    const regionColors = regions.map((r) => new THREE.Color(r.color))
+
+    // ─ Edge lines ─────────────────────────────────────────
+    const edgeVerts = new Float32Array(edges.length * 6)
+    const edgeCols = new Float32Array(edges.length * 6)
+    for (let i = 0; i < edges.length; i++) {
+      const [a, b] = edges[i]
+      const pa = nodes[a].position
+      const pb = nodes[b].position
+      edgeVerts[i * 6 + 0] = pa[0]; edgeVerts[i * 6 + 1] = pa[1]; edgeVerts[i * 6 + 2] = pa[2]
+      edgeVerts[i * 6 + 3] = pb[0]; edgeVerts[i * 6 + 4] = pb[1]; edgeVerts[i * 6 + 5] = pb[2]
+
+      // Blend colours of the two endpoints
+      const ca = regionColors[nodes[a].region]
+      const cb = regionColors[nodes[b].region]
+      edgeCols[i * 6 + 0] = ca.r; edgeCols[i * 6 + 1] = ca.g; edgeCols[i * 6 + 2] = ca.b
+      edgeCols[i * 6 + 3] = cb.r; edgeCols[i * 6 + 4] = cb.g; edgeCols[i * 6 + 5] = cb.b
+    }
+    const eGeo = new THREE.BufferGeometry()
+    eGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgeVerts, 3))
+    eGeo.setAttribute('color', new THREE.Float32BufferAttribute(edgeCols, 3))
+
+    // ─ Node points ────────────────────────────────────────
+    const nPos = new Float32Array(nodes.length * 3)
+    const nCol = new Float32Array(nodes.length * 3)
+    const nSize = new Float32Array(nodes.length)
+    const nRegion = new Int32Array(nodes.length)
+    for (let i = 0; i < nodes.length; i++) {
+      const p = nodes[i].position
+      const c = regionColors[nodes[i].region]
+      nPos[i * 3] = p[0]; nPos[i * 3 + 1] = p[1]; nPos[i * 3 + 2] = p[2]
+      nCol[i * 3] = c.r; nCol[i * 3 + 1] = c.g; nCol[i * 3 + 2] = c.b
+      nSize[i] = 0.018
+      nRegion[i] = nodes[i].region
+    }
+
+    // ─ Particles ──────────────────────────────────────────
+    const pPos = new Float32Array(PARTICLE_COUNT * 3)
+    const parts: Particle[] = []
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const edgeIdx = Math.floor(Math.random() * edges.length)
+      const [a] = edges[edgeIdx]
+      parts.push({
+        edgeIdx,
+        t: Math.random(),
+        speed: 0.15 + Math.random() * 0.35,
+        regionSource: nodes[a].region,
+      })
+    }
+
+    return {
+      edgeGeometry: eGeo,
+      edgeColors: edgeCols,
+      nodePositions: nPos,
+      nodeColors: nCol,
+      nodeSizes: nSize,
+      nodeRegionIds: nRegion,
+      particlePositions: pPos,
+      particlesData: parts,
+    }
+  }, [data])
+
+  // ── Animate ─────────────────────────────────────────────
   useFrame((state) => {
+    if (!data || !particlesRef.current || !nodesRef.current || !edgeLinesRef.current) return
+
     const time = state.clock.getElapsedTime()
-    
-    if (meshRef.current) {
-      // Slow rotation
-      const baseSpeed = 0.15
-      const speedMod = hovered ? 1.3 : 1
-      meshRef.current.rotation.y = time * baseSpeed * speedMod
-      
-      // Subtle tilt on hover
-      meshRef.current.rotation.x = Math.sin(time * 0.3) * 0.05 + (hovered ? 0.1 : 0)
+    const dt = state.clock.getDelta()
+    const { nodes, edges, regions } = data
+
+    // Determine which region indices are "active"
+    const activeIdxSet = new Set<number>()
+    if (activeRegions) {
+      regions.forEach((r, i) => { if (activeRegions.has(r.id)) activeIdxSet.add(i) })
     }
-    
-    if (wireframeRef.current) {
-      wireframeRef.current.rotation.y = meshRef.current?.rotation.y || 0
-      wireframeRef.current.rotation.x = meshRef.current?.rotation.x || 0
-    }
-    
-    if (nodesRef.current) {
-      nodesRef.current.rotation.y = meshRef.current?.rotation.y || 0
-      nodesRef.current.rotation.x = meshRef.current?.rotation.x || 0
-      
-      // Animate node sizes based on strength and time
-      const sizes = nodesRef.current.geometry.attributes.size as THREE.BufferAttribute
-      const strengths = nodesRef.current.geometry.attributes.strength as THREE.BufferAttribute
-      
-      for (let i = 0; i < nodeData.length; i++) {
-        const baseSize = 1.5 + nodeData[i].baseStrength * 2
-        const pulse = Math.sin(time * 2 + nodeData[i].phase) * 0.5 + 0.5
-        const hoverBoost = hovered ? 1.15 : 1
-        sizes.array[i] = baseSize * (0.85 + pulse * 0.3) * hoverBoost
+    const anyActive = activeIdxSet.size > 0
+
+    // ── Update node colours & sizes based on activation ──
+    const nCol = nodesRef.current.geometry.attributes.color as THREE.BufferAttribute
+    const nSize = nodesRef.current.geometry.attributes.size as THREE.BufferAttribute
+    const regionColors = regions.map((r) => new THREE.Color(r.color))
+    const dimColor = new THREE.Color('#1a2a3a')
+
+    for (let i = 0; i < nodes.length; i++) {
+      const ri = nodes[i].region
+      const active = !anyActive || activeIdxSet.has(ri)
+      const hoverBright = hoveredRegion === ri
+      const proficiency = proficiencyLevels?.[regions[ri].id] ?? (anyActive && active ? 0.7 : 0.35)
+      const intensity = active ? proficiency : 0.08
+
+      const baseColor = regionColors[ri]
+      const color = active ? baseColor.clone() : dimColor.clone()
+
+      // Pulse for active nodes
+      if (active) {
+        const pulse = Math.sin(time * 2.0 + i * 0.3) * 0.15 + 0.85
+        color.multiplyScalar(intensity * pulse * (hoverBright ? 1.4 : 1.0))
+      } else {
+        color.multiplyScalar(intensity)
       }
-      sizes.needsUpdate = true
+
+      nCol.array[i * 3] = color.r
+      nCol.array[i * 3 + 1] = color.g
+      nCol.array[i * 3 + 2] = color.b
+
+      // Size: bigger when active
+      const baseSize = active ? 0.022 + proficiency * 0.012 : 0.012
+      const sizePulse = active ? Math.sin(time * 1.5 + i * 0.5) * 0.003 + 1 : 1
+      ;(nSize.array as Float32Array)[i] = baseSize * sizePulse * (hoverBright ? 1.3 : 1.0)
     }
-    
-    if (glowNodesRef.current) {
-      glowNodesRef.current.rotation.y = meshRef.current?.rotation.y || 0
-      glowNodesRef.current.rotation.x = meshRef.current?.rotation.x || 0
+    nCol.needsUpdate = true
+    nSize.needsUpdate = true
+
+    // ── Update edge colours ───────────────────────────────
+    const eCol = edgeLinesRef.current.geometry.attributes.color as THREE.BufferAttribute
+    for (let i = 0; i < edges.length; i++) {
+      const [a, b] = edges[i]
+      const ra = nodes[a].region, rb = nodes[b].region
+      const aActive = !anyActive || activeIdxSet.has(ra)
+      const bActive = !anyActive || activeIdxSet.has(rb)
+      const profA = proficiencyLevels?.[regions[ra].id] ?? (aActive ? 0.5 : 0.1)
+      const profB = proficiencyLevels?.[regions[rb].id] ?? (bActive ? 0.5 : 0.1)
+
+      const ca = aActive ? regionColors[ra].clone().multiplyScalar(profA * 0.45) : dimColor.clone().multiplyScalar(0.08)
+      const cb = bActive ? regionColors[rb].clone().multiplyScalar(profB * 0.45) : dimColor.clone().multiplyScalar(0.08)
+
+      eCol.array[i * 6 + 0] = ca.r; eCol.array[i * 6 + 1] = ca.g; eCol.array[i * 6 + 2] = ca.b
+      eCol.array[i * 6 + 3] = cb.r; eCol.array[i * 6 + 4] = cb.g; eCol.array[i * 6 + 5] = cb.b
     }
+    eCol.needsUpdate = true
+
+    // ── Animate particles along edges ─────────────────────
+    const pPos = particlesRef.current.geometry.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const p = particlesData[i]
+      p.t += p.speed * dt
+
+      if (p.t >= 1) {
+        // Hop to a connected edge
+        const [, endNode] = edges[p.edgeIdx]
+        const connected = edges.reduce<number[]>((acc, e, idx) => {
+          if (e[0] === endNode || e[1] === endNode) acc.push(idx)
+          return acc
+        }, [])
+        p.edgeIdx = connected[Math.floor(Math.random() * connected.length)] ?? Math.floor(Math.random() * edges.length)
+        p.t = 0
+        p.regionSource = nodes[edges[p.edgeIdx][0]].region
+      }
+
+      const [ea, eb] = edges[p.edgeIdx]
+      const pa = nodes[ea].position, pb = nodes[eb].position
+      const t = p.t
+      pPos.array[i * 3 + 0] = pa[0] + (pb[0] - pa[0]) * t
+      pPos.array[i * 3 + 1] = pa[1] + (pb[1] - pa[1]) * t
+      pPos.array[i * 3 + 2] = pa[2] + (pb[2] - pa[2]) * t
+    }
+    pPos.needsUpdate = true
   })
-  
-  // Custom shader for nodes
-  const nodeShader = useMemo(() => ({
-    uniforms: {
-      time: { value: 0 },
-      hovered: { value: 0 }
+
+  // ── Hover detection via raycasting on nodes ─────────────
+  const handlePointerMove = useCallback(
+    (e: any) => {
+      if (!data || !nodesRef.current) return
+      e.stopPropagation()
+      const inter = e.intersections?.[0]
+      if (inter && inter.index != null) {
+        const idx = inter.index
+        const ri = data.nodes[idx]?.region ?? null
+        setHoveredRegion(ri)
+        if (ri !== null) onRegionHover?.(data.regions[ri].id)
+      }
     },
-    vertexShader: `
-      attribute float size;
-      attribute float strength;
-      varying float vStrength;
-      
-      void main() {
-        vStrength = strength;
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = size * (300.0 / -mvPosition.z);
-        gl_Position = projectionMatrix * mvPosition;
+    [data, onRegionHover],
+  )
+
+  const handlePointerOut = useCallback(() => {
+    setHoveredRegion(null)
+    onRegionHover?.(null)
+  }, [onRegionHover])
+
+  const handleClick = useCallback(
+    (e: any) => {
+      if (!data) return
+      e.stopPropagation()
+      const inter = e.intersections?.[0]
+      if (inter && inter.index != null) {
+        const ri = data.nodes[inter.index]?.region
+        if (ri != null) onRegionClick?.(data.regions[ri].id)
       }
-    `,
-    fragmentShader: `
-      varying float vStrength;
-      
-      void main() {
-        float dist = length(gl_PointCoord - vec2(0.5));
-        if (dist > 0.5) discard;
-        
-        float intensity = 1.0 - dist * 2.0;
-        intensity = pow(intensity, 2.0);
-        
-        vec3 color = vec3(1.0);
-        float alpha = intensity * (0.3 + vStrength * 0.5);
-        
-        gl_FragColor = vec4(color, alpha);
-      }
-    `
-  }), [])
-  
-  const glowShader = useMemo(() => ({
-    uniforms: {
-      time: { value: 0 }
     },
-    vertexShader: `
-      attribute float size;
-      attribute float strength;
-      varying float vStrength;
-      
-      void main() {
-        vStrength = strength;
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = size * (300.0 / -mvPosition.z);
-        gl_Position = projectionMatrix * mvPosition;
-      }
-    `,
-    fragmentShader: `
-      varying float vStrength;
-      
-      void main() {
-        float dist = length(gl_PointCoord - vec2(0.5));
-        if (dist > 0.5) discard;
-        
-        float intensity = 1.0 - dist * 2.0;
-        intensity = pow(intensity, 4.0);
-        
-        vec3 color = vec3(1.0);
-        float alpha = intensity * vStrength * 0.08;
-        
-        gl_FragColor = vec4(color, alpha);
-      }
-    `
-  }), [])
-  
+    [data, onRegionClick],
+  )
+
+  if (!data || !edgeGeometry) return null
+
   return (
-    <group>
-      {/* Main mesh - dark translucent faces */}
-      <mesh ref={meshRef} geometry={geometry}>
-        <meshStandardMaterial
-          color="#1a1a2e"
-          roughness={0.8}
-          metalness={0.2}
-          transparent
-          opacity={0.6}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-      
-      {/* Wireframe edges */}
-      <lineSegments ref={wireframeRef} geometry={wireframeGeometry}>
-        <lineBasicMaterial color="#404060" transparent opacity={0.4} />
+    <group ref={groupRef} rotation={[0, -Math.PI / 2, 0]}>
+      {/* Edge connection lines */}
+      <lineSegments ref={edgeLinesRef} geometry={edgeGeometry}>
+        <lineBasicMaterial vertexColors transparent opacity={0.35} depthWrite={false} />
       </lineSegments>
-      
-      {/* Glow nodes (background) */}
-      <points ref={glowNodesRef} geometry={glowNodeGeometry}>
-        <shaderMaterial
-          {...glowShader}
+
+      {/* Node points (interactive) */}
+      <points
+        ref={nodesRef}
+        onPointerMove={handlePointerMove}
+        onPointerOut={handlePointerOut}
+        onClick={handleClick}
+      >
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            array={nodePositions}
+            count={data.nodes.length}
+            itemSize={3}
+          />
+          <bufferAttribute
+            attach="attributes-color"
+            array={nodeColors}
+            count={data.nodes.length}
+            itemSize={3}
+          />
+          <bufferAttribute
+            attach="attributes-size"
+            array={nodeSizes}
+            count={data.nodes.length}
+            itemSize={1}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          vertexColors
+          size={0.02}
+          sizeAttenuation
           transparent
+          opacity={0.9}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
         />
       </points>
-      
-      {/* Main nodes */}
-      <points ref={nodesRef} geometry={nodeGeometry}>
-        <shaderMaterial
-          {...nodeShader}
+
+      {/* Signal particles */}
+      <points ref={particlesRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            array={particlePositions}
+            count={PARTICLE_COUNT}
+            itemSize={3}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          color="#ffffff"
+          size={0.025}
+          sizeAttenuation
           transparent
+          opacity={0.85}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
         />
