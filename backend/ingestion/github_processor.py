@@ -82,8 +82,12 @@ class GitHubProcessor:
             # Fetch languages
             languages = self._fetch_languages(owner, repo_name)
             
+            # Fetch file tree for extra signal
+            default_branch = repo_info.get("default_branch", "main")
+            file_paths = self._fetch_tree(owner, repo_name, default_branch)
+            
             # Construct content
-            content = self._construct_content(repo_info, readme_content, languages)
+            content = self._construct_content(repo_info, readme_content, languages, file_paths)
             
             # Build metadata
             metadata = {
@@ -123,8 +127,10 @@ class GitHubProcessor:
     
     def _validate_repo_url(self, url: str) -> Dict[str, Any]:
         """Validate GitHub repository URL."""
-        # Remove trailing slash
+        # Remove trailing slash and .git suffix
         url = url.rstrip("/")
+        if url.endswith(".git"):
+            url = url[:-4]
         
         # Pattern for GitHub URLs
         pattern = r"^https?://(?:www\.)?github\.com/([^/]+)/([^/]+)$"
@@ -206,11 +212,27 @@ class GitHubProcessor:
         except requests.RequestException:
             return []
     
+    def _fetch_tree(self, owner: str, repo: str, branch: str = "main") -> List[str]:
+        """Fetch the file tree (paths) from the repo's default branch."""
+        url = f"{self.api_base}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+        try:
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
+            if response.status_code == 404 and branch == "main":
+                # Try 'master' as fallback
+                url = f"{self.api_base}/repos/{owner}/{repo}/git/trees/master?recursive=1"
+                response = requests.get(url, headers=self.headers, timeout=self.timeout)
+            response.raise_for_status()
+            tree = response.json().get("tree", [])
+            return [item["path"] for item in tree if item.get("type") == "blob"][:200]
+        except requests.RequestException:
+            return []
+
     def _construct_content(
         self,
         repo_info: Dict[str, Any],
         readme: str,
         languages: List[str],
+        file_paths: Optional[List[str]] = None,
     ) -> str:
         """Construct a text representation of the repository."""
         parts = []
@@ -234,6 +256,34 @@ class GitHubProcessor:
         if repo_info.get("topics"):
             parts.append(f"Topics: {', '.join(repo_info['topics'])}")
         
+        # File tree — helps Gemini infer tech stack from filenames
+        if file_paths:
+            # Highlight notable config / tech-signal files
+            signal_files = [
+                f for f in file_paths
+                if any(kw in f.lower() for kw in [
+                    "dockerfile", "docker-compose", ".github/workflows",
+                    "package.json", "requirements.txt", "pyproject.toml",
+                    "tsconfig", "tailwind", "next.config", "vite.config",
+                    "jest.config", "pytest", ".eslint", "webpack",
+                    "setup.py", "setup.cfg", "makefile", "cmake",
+                    "terraform", "k8s", "kubernetes", "helm",
+                    ".env", "api/", "routes", "schema", "model",
+                    "test", "spec", "__test__",
+                ])
+            ]
+            if signal_files:
+                parts.append(f"\nNotable files: {', '.join(signal_files[:40])}")
+
+            # Show directory structure overview (top-level + first-level dirs)
+            top_dirs = sorted(set(
+                f.split('/')[0] for f in file_paths if '/' in f
+            ))
+            if top_dirs:
+                parts.append(f"Project directories: {', '.join(top_dirs[:30])}")
+
+            parts.append(f"Total files: {len(file_paths)}")
+
         # README
         if readme:
             parts.append("\n--- README ---\n")

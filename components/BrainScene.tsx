@@ -6,16 +6,17 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import LowPolyBrain from './LowPolyBrain'
 
-// ── Default proficiency levels (idle demo state) ──────────
+// ── Default proficiency levels (fully dark until scored) ──
 const DEMO_PROFICIENCY: Record<string, number> = {
-  Region_Frontend:  0.5,
-  Region_Product:   0.35,
-  Region_Backend:   0.6,
-  Region_Systems:   0.3,
-  Region_AI:        0.55,
-  Region_Data:      0.4,
-  Region_DevOps:    0.45,
-  Region_Hackathon: 0.5,
+  Region_Fundamentals:  0.0,
+  Region_OOP:           0.0,
+  Region_DataStructures:0.0,
+  Region_Algorithms:    0.0,
+  Region_Systems:       0.0,
+  Region_Frontend:      0.0,
+  Region_DevPractices:  0.0,
+  Region_Product:       0.0,
+  Region_Hackathon:     0.0,
 }
 
 function Scene({

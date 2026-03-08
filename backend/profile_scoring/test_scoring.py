@@ -59,7 +59,7 @@ print("\n── 1. Module Imports ───────────────�
 @test("Import categories")
 def _():
     from backend.profile_scoring.categories import CATEGORY_KEYS, zero_scores, NUM_CATEGORIES
-    assert len(CATEGORY_KEYS) == 37, f"Expected 37, got {len(CATEGORY_KEYS)}"
+    assert len(CATEGORY_KEYS) == NUM_CATEGORIES, f"Expected {NUM_CATEGORIES}, got {len(CATEGORY_KEYS)}"
     zs = zero_scores()
     assert all(v == 0.0 for v in zs.values())
     assert len(zs) == NUM_CATEGORIES

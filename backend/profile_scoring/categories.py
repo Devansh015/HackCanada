@@ -59,9 +59,29 @@ CATEGORIES: List[Tuple[str, str, str]] = [
     ("concurrency",             "Concurrency",              "Systems"),
     ("networking",              "Networking",               "Systems"),
 
+    # ── Frontend & UI ────────────────────────────────────────
+    ("html_css",                "HTML & CSS",               "Frontend"),
+    ("javascript_ts",           "JavaScript / TypeScript",  "Frontend"),
+    ("react",                   "React / Component Frameworks","Frontend"),
+    ("responsive_design",       "Responsive & Accessible Design","Frontend"),
+    ("ui_ux",                   "UI / UX Principles",       "Frontend"),
+
     # ── Dev Practices ────────────────────────────────────────
     ("git",                     "Git",                      "Dev Practices"),
     ("testing",                 "Testing",                  "Dev Practices"),
+    ("ci_cd",                   "CI / CD Pipelines",        "Dev Practices"),
+    ("docker_containers",       "Docker & Containers",      "Dev Practices"),
+    ("cloud_infra",             "Cloud Infrastructure",     "Dev Practices"),
+
+    # ── Product & Collaboration ──────────────────────────────
+    ("documentation",           "Documentation",            "Product"),
+    ("project_management",      "Project Management",       "Product"),
+    ("system_design",           "System Design",            "Product"),
+
+    # ── Hackathon / Applied ──────────────────────────────────
+    ("prototyping",             "Rapid Prototyping",        "Hackathon"),
+    ("integrations",            "Third-party Integrations", "Hackathon"),
+    ("problem_solving",         "Creative Problem Solving", "Hackathon"),
 ]
 
 # Derived look-ups (computed once at import time)

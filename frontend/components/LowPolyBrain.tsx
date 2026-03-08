@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 
 // ── Types ─────────────────────────────────────────────────
@@ -151,6 +152,12 @@ export default function LowPolyBrain({
     const dt = state.clock.getDelta()
     const { nodes, edges, regions } = data
 
+    // Check if any region has real proficiency (above the 0.15 idle default)
+    const hasRealData = regions.some(
+      (r) => (proficiencyLevels?.[r.id] ?? 0) > 0.16
+    )
+    const whiteColor = new THREE.Color('#ffffff')
+
     // Determine which region indices are "active"
     const activeIdxSet = new Set<number>()
     if (activeRegions) {
@@ -171,15 +178,17 @@ export default function LowPolyBrain({
       const proficiency = proficiencyLevels?.[regions[ri].id] ?? (anyActive && active ? 0.7 : 0.35)
       const intensity = active ? proficiency : 0.08
 
-      const baseColor = regionColors[ri]
-      const color = active ? baseColor.clone() : dimColor.clone()
-
-      // Pulse for active nodes
-      if (active) {
+      let color: THREE.Color
+      if (!hasRealData) {
+        // Idle state: white outline
+        const pulse = Math.sin(time * 1.2 + i * 0.2) * 0.1 + 0.9
+        color = whiteColor.clone().multiplyScalar(0.35 * pulse)
+      } else if (active) {
+        color = regionColors[ri].clone()
         const pulse = Math.sin(time * 2.0 + i * 0.3) * 0.15 + 0.85
         color.multiplyScalar(intensity * pulse * (hoverBright ? 1.4 : 1.0))
       } else {
-        color.multiplyScalar(intensity)
+        color = dimColor.clone().multiplyScalar(intensity)
       }
 
       nCol.array[i * 3] = color.r
@@ -187,9 +196,14 @@ export default function LowPolyBrain({
       nCol.array[i * 3 + 2] = color.b
 
       // Size: bigger when active
-      const baseSize = active ? 0.022 + proficiency * 0.012 : 0.012
-      const sizePulse = active ? Math.sin(time * 1.5 + i * 0.5) * 0.003 + 1 : 1
-      ;(nSize.array as Float32Array)[i] = baseSize * sizePulse * (hoverBright ? 1.3 : 1.0)
+      if (!hasRealData) {
+        const sizePulse = Math.sin(time * 1.2 + i * 0.3) * 0.002 + 1
+        ;(nSize.array as Float32Array)[i] = 0.016 * sizePulse
+      } else {
+        const baseSize = active ? 0.022 + proficiency * 0.012 : 0.012
+        const sizePulse = active ? Math.sin(time * 1.5 + i * 0.5) * 0.003 + 1 : 1
+        ;(nSize.array as Float32Array)[i] = baseSize * sizePulse * (hoverBright ? 1.3 : 1.0)
+      }
     }
     nCol.needsUpdate = true
     nSize.needsUpdate = true
@@ -199,16 +213,24 @@ export default function LowPolyBrain({
     for (let i = 0; i < edges.length; i++) {
       const [a, b] = edges[i]
       const ra = nodes[a].region, rb = nodes[b].region
-      const aActive = !anyActive || activeIdxSet.has(ra)
-      const bActive = !anyActive || activeIdxSet.has(rb)
-      const profA = proficiencyLevels?.[regions[ra].id] ?? (aActive ? 0.5 : 0.1)
-      const profB = proficiencyLevels?.[regions[rb].id] ?? (bActive ? 0.5 : 0.1)
 
-      const ca = aActive ? regionColors[ra].clone().multiplyScalar(profA * 0.45) : dimColor.clone().multiplyScalar(0.08)
-      const cb = bActive ? regionColors[rb].clone().multiplyScalar(profB * 0.45) : dimColor.clone().multiplyScalar(0.08)
+      if (!hasRealData) {
+        // Idle state: white edges
+        const edgeWhite = 0.18
+        eCol.array[i * 6 + 0] = edgeWhite; eCol.array[i * 6 + 1] = edgeWhite; eCol.array[i * 6 + 2] = edgeWhite
+        eCol.array[i * 6 + 3] = edgeWhite; eCol.array[i * 6 + 4] = edgeWhite; eCol.array[i * 6 + 5] = edgeWhite
+      } else {
+        const aActive = !anyActive || activeIdxSet.has(ra)
+        const bActive = !anyActive || activeIdxSet.has(rb)
+        const profA = proficiencyLevels?.[regions[ra].id] ?? (aActive ? 0.5 : 0.1)
+        const profB = proficiencyLevels?.[regions[rb].id] ?? (bActive ? 0.5 : 0.1)
 
-      eCol.array[i * 6 + 0] = ca.r; eCol.array[i * 6 + 1] = ca.g; eCol.array[i * 6 + 2] = ca.b
-      eCol.array[i * 6 + 3] = cb.r; eCol.array[i * 6 + 4] = cb.g; eCol.array[i * 6 + 5] = cb.b
+        const ca = aActive ? regionColors[ra].clone().multiplyScalar(profA * 0.45) : dimColor.clone().multiplyScalar(0.08)
+        const cb = bActive ? regionColors[rb].clone().multiplyScalar(profB * 0.45) : dimColor.clone().multiplyScalar(0.08)
+
+        eCol.array[i * 6 + 0] = ca.r; eCol.array[i * 6 + 1] = ca.g; eCol.array[i * 6 + 2] = ca.b
+        eCol.array[i * 6 + 3] = cb.r; eCol.array[i * 6 + 4] = cb.g; eCol.array[i * 6 + 5] = cb.b
+      }
     }
     eCol.needsUpdate = true
 
@@ -341,6 +363,32 @@ export default function LowPolyBrain({
           blending={THREE.AdditiveBlending}
         />
       </points>
+
+      {/* Persistent region labels — only when real data exists */}
+      {data.regions.some((r) => (proficiencyLevels?.[r.id] ?? 0) > 0.16) &&
+        data.regions.map((region) => (
+        <Html
+          key={region.id}
+          position={region.center}
+          center
+          distanceFactor={5}
+          style={{ pointerEvents: 'none' }}
+        >
+          <div
+            style={{
+              color: '#ffffff',
+              fontSize: '11px',
+              fontWeight: 600,
+              textShadow: `0 0 6px ${region.color}, 0 0 12px ${region.color}, 0 0 24px rgba(0,0,0,1)`,
+              whiteSpace: 'nowrap',
+              opacity: 0.9,
+              userSelect: 'none',
+            }}
+          >
+            {region.label}
+          </div>
+        </Html>
+      ))}
     </group>
   )
 }

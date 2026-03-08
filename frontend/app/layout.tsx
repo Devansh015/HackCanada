@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { ProfileProvider } from '@/context/ProfileContext'
 
 export const metadata: Metadata = {
   title: 'Lumas | Neural Intelligence',
@@ -13,7 +14,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <ProfileProvider>
+          {children}
+        </ProfileProvider>
+      </body>
     </html>
   )
 }
