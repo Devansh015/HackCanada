@@ -45,8 +45,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY: str = os.getenv("GOOGLE_CLOUD_CONSOLE_API_KEY", "")
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+api_key = os.getenv("GOOGLE_CLOUD_CONSOLE_API_KEY", "")
+model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 
 # ────────────────────────────────────────────────────────────
@@ -236,9 +236,9 @@ def chat_with_profile(
     contents.append({"role": "user", "parts": [{"text": message}]})
 
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=model, 
             contents=contents,
             config={
                 "system_instruction": system_prompt,
