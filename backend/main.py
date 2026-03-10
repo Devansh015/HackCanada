@@ -1,9 +1,11 @@
 """
 FastAPI application entry point for Cortex backend.
 
-Run with: uvicorn backend.main:app --reload --port 8000
+Run locally:  uvicorn main:app --reload --port 8000
+Deploy:       Railway reads Procfile / railway.toml automatically.
 """
 
+import os
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -20,14 +22,18 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS configuration for frontend
+# CORS — allow frontend origins from env or fall back to localhost defaults
+_default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+]
+_env_origins = os.getenv("CORS_ORIGINS", "")
+cors_origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",      # Next.js dev server
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",      # Alternate port
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
