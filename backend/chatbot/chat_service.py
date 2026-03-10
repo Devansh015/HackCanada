@@ -18,13 +18,13 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from profile_scoring.categories import (
+from backend.profile_scoring.categories import (
     CATEGORY_GROUPS,
     CATEGORY_KEYS,
     CATEGORY_MAP,
 )
-from profile_scoring.models import UserProfile
-from profile_scoring.profile_manager import (
+from backend.profile_scoring.models import UserProfile
+from backend.profile_scoring.profile_manager import (
     get_upload_history,
     get_user_profile,
 )
@@ -36,15 +36,10 @@ from .models import (
     InsightsResponse,
 )
 
-# Load .env — walk upward to find it (works locally & on Railway)
+# Load .env from project root
 try:
     from dotenv import load_dotenv
-    _p = Path(__file__).resolve().parent
-    while _p != _p.parent:
-        if (_p / ".env").exists():
-            load_dotenv(_p / ".env", override=False)
-            break
-        _p = _p.parent
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 except ImportError:
     pass
 
