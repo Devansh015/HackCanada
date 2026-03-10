@@ -265,4 +265,4 @@ http://localhost:3000
 
 # 👥 Team
 
-Built by **Devansh Jain, Yash Soni, and Dharm Patel** for **HackCanada 2026**.
+Built by **Devansh Jain, Yash Soni and Dharm Patel** for **HackCanada 2026**.
