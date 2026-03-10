@@ -14,7 +14,7 @@ import type {
   InsightsResponse,
 } from '@/types/api'
 
-const API_ROOT = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+const API_ROOT = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080').replace(/\/$/, '')
 const API_BASE = `${API_ROOT}/api`
 
 class ApiError extends Error {

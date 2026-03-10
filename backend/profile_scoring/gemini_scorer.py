@@ -69,21 +69,44 @@ def reset_token_stats() -> None:
 
 
 # ────────────────────────────────────────────────────────────
-#  Prompt template
-# ────────────────────────────────────────────────────────────
-
-# ────────────────────────────────────────────────────────────
 #  Prompt template  (compact — saves ~60% input tokens)
 # ────────────────────────────────────────────────────────────
 
-# Just the keys, no labels — Gemini knows what they mean
-_CATEGORY_KEYS_STR = ", ".join(CATEGORY_KEYS)
+# FIX #2: Include human-readable labels alongside keys so Gemini can
+# correctly map ambiguous keys like "ci_cd", "html_css", "oop", etc.
+# Previously only raw keys were sent, causing Gemini to silently drop
+# any category key it didn't recognise.
+_CATEGORY_KEYS_STR = ", ".join(
+    f"{k} ({CATEGORY_MAP[k]})" if k in CATEGORY_MAP else k
+    for k in CATEGORY_KEYS
+)
+
+# FIX #1: Per-source-type hints so the prompt isn't always GitHub-biased.
+# Previously source_type was accepted but never injected into the prompt,
+# causing every content type (PDFs, resumes, text) to be scored as if it
+# were a GitHub repo — skewing results heavily toward dev/framework skills.
+_SOURCE_HINTS: Dict[str, str] = {
+    "github_repo": (
+        "Infer skills from languages, frameworks, file structure, "
+        "and project type — not just explicit mentions."
+    ),
+    "pdf": (
+        "Infer skills from the document's topics, technologies, "
+        "and described experience. Consider both explicit mentions "
+        "and implied expertise."
+    ),
+    "text_prompt": (
+        "Infer skills from the explicit content and any implied "
+        "technical knowledge or domain expertise."
+    ),
+}
+_DEFAULT_SOURCE_HINT = _SOURCE_HINTS["text_prompt"]
 
 SCORING_PROMPT_TEMPLATE = """Score this content's relevance to CS categories.
 Categories: {categories}
 
 Scale: 0.0=none, 0.3=mentioned, 0.6=demonstrated, 1.0=expert.
-For GitHub repos: infer skills from languages, frameworks, file structure, and project type — not just explicit mentions.
+{source_hint}
 Only include categories scoring >0. Return compact JSON:
 {{"s":{{"key":float,...}}}}
 
@@ -141,8 +164,12 @@ def score_content_with_gemini(
         logger.info("Cache hit – skipping Gemini call")
         return _score_cache[content_hash]
 
+    # FIX #1: Inject the correct source hint so the prompt is tailored to the
+    # content type rather than always defaulting to GitHub repo framing.
+    source_hint = _SOURCE_HINTS.get(source_type, _DEFAULT_SOURCE_HINT)
     prompt = SCORING_PROMPT_TEMPLATE.format(
         categories=_CATEGORY_KEYS_STR,
+        source_hint=source_hint,
         content=trimmed,
     )
 
@@ -170,6 +197,7 @@ def _call_gemini(prompt: str, api_key: str, model: str) -> tuple[str, int]:
     """Call the Gemini API and return (response_text, token_count)."""
     try:
         from google import genai
+        from google.genai import types as genai_types
     except ImportError:
         raise ImportError(
             "google-genai is required for Gemini scoring. "
@@ -178,17 +206,33 @@ def _call_gemini(prompt: str, api_key: str, model: str) -> tuple[str, int]:
 
     client = genai.Client(api_key=api_key)
 
-    # Build config — disable thinking for 2.5 models (saves ~5-8s per call)
+    # FIX #3: Add a response_schema so Gemini is constrained to return ALL
+    # category keys rather than inventing its own reduced output structure.
+    # Previously, JSON mode without a schema let Gemini decide which keys to
+    # include — it would return only the top few it was most confident about,
+    # making it look like only certain skills were ever detected.
+    score_properties = {key: genai_types.Schema(type="NUMBER") for key in CATEGORY_KEYS}
+    response_schema = genai_types.Schema(
+        type="OBJECT",
+        properties={
+            "s": genai_types.Schema(
+                type="OBJECT",
+                properties=score_properties,
+            )
+        },
+    )
+
     config_kwargs = dict(
         temperature=0.0,
         max_output_tokens=2048,
         response_mime_type="application/json",
+        response_schema=response_schema,   # FIX #3: enforce full category output
     )
 
     # Gemini 2.5 models support thinking budget — set to 0 to skip thinking
     if "2.5" in model:
         try:
-            config_kwargs["thinking_config"] = genai.types.ThinkingConfig(
+            config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
                 thinking_budget=0
             )
         except (AttributeError, TypeError):
@@ -197,7 +241,7 @@ def _call_gemini(prompt: str, api_key: str, model: str) -> tuple[str, int]:
     response = client.models.generate_content(
         model=model,
         contents=prompt,
-        config=genai.types.GenerateContentConfig(**config_kwargs),
+        config=genai_types.GenerateContentConfig(**config_kwargs),
     )
 
     text = response.text or ""
