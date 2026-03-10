@@ -18,16 +18,16 @@ from datetime import datetime
 # Ensure the backend package is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from backend.ingestion.input_detector import detect_input_type
-from backend.ingestion.text_processor import TextPromptProcessor
-from backend.ingestion.github_processor import GitHubProcessor
-from backend.ingestion.pdf_processor import PDFProcessor
-from backend.ingestion.chunker import SemanticChunker, create_chunker
-from backend.ingestion.backboard_client import (
+from ingestion.input_detector import detect_input_type
+from ingestion.text_processor import TextPromptProcessor
+from ingestion.github_processor import GitHubProcessor
+from ingestion.pdf_processor import PDFProcessor
+from ingestion.chunker import SemanticChunker, create_chunker
+from ingestion.backboard_client import (
     BackboardMemoryAdapter,
     LocalMemoryStore,
 )
-from backend.ingestion.ingestion_pipeline import IngestionPipeline
+from ingestion.ingestion_pipeline import IngestionPipeline
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

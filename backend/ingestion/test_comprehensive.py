@@ -29,27 +29,27 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from backend.ingestion.input_detector import (
+from ingestion.input_detector import (
     detect_input_type,
     _is_github_url,
     _is_url,
     _extract_github_metadata,
     _infer_text_category,
 )
-from backend.ingestion.text_processor import TextPromptProcessor
-from backend.ingestion.github_processor import GitHubProcessor
-from backend.ingestion.pdf_processor import PDFProcessor
-from backend.ingestion.chunker import (
+from ingestion.text_processor import TextPromptProcessor
+from ingestion.github_processor import GitHubProcessor
+from ingestion.pdf_processor import PDFProcessor
+from ingestion.chunker import (
     SemanticChunker,
     FixedSizeChunker,
     create_chunker,
     Chunk,
 )
-from backend.ingestion.backboard_client import (
+from ingestion.backboard_client import (
     BackboardMemoryAdapter,
     LocalMemoryStore,
 )
-from backend.ingestion.ingestion_pipeline import IngestionPipeline, ingest_input
+from ingestion.ingestion_pipeline import IngestionPipeline, ingest_input
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

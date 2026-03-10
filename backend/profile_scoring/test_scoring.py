@@ -58,7 +58,7 @@ print("\n── 1. Module Imports ───────────────�
 
 @test("Import categories")
 def _():
-    from backend.profile_scoring.categories import CATEGORY_KEYS, zero_scores, NUM_CATEGORIES
+    from profile_scoring.categories import CATEGORY_KEYS, zero_scores, NUM_CATEGORIES
     assert len(CATEGORY_KEYS) == NUM_CATEGORIES, f"Expected {NUM_CATEGORIES}, got {len(CATEGORY_KEYS)}"
     zs = zero_scores()
     assert all(v == 0.0 for v in zs.values())
@@ -66,7 +66,7 @@ def _():
 
 @test("Import models")
 def _():
-    from backend.profile_scoring.models import (
+    from profile_scoring.models import (
         UserProfile, GeminiScoringResult, UploadScoreSnapshot,
         ProfileUpdateSummary, source_weight,
     )
@@ -77,7 +77,7 @@ def _():
 
 @test("Import orchestrator")
 def _():
-    from backend.profile_scoring.orchestrator import (
+    from profile_scoring.orchestrator import (
         update_profile_from_upload,
         initialize_user_profile,
         get_user_profile,
@@ -86,7 +86,7 @@ def _():
 
 @test("Import router")
 def _():
-    from backend.profile_scoring.router import router
+    from profile_scoring.router import router
     assert router.prefix == "/profile"
 
 
@@ -95,7 +95,7 @@ print("\n── 2. Profile CRUD ────────────────
 
 @test("Create profile")
 def _():
-    from backend.profile_scoring.profile_manager import initialize_user_profile, get_user_profile
+    from profile_scoring.profile_manager import initialize_user_profile, get_user_profile
     p = initialize_user_profile("test_user_1")
     assert p.user_id == "test_user_1"
     assert p.upload_count == 0
@@ -103,20 +103,20 @@ def _():
 
 @test("Retrieve profile")
 def _():
-    from backend.profile_scoring.profile_manager import get_user_profile
+    from profile_scoring.profile_manager import get_user_profile
     p = get_user_profile("test_user_1")
     assert p is not None
     assert p.user_id == "test_user_1"
 
 @test("Non-existent profile returns None")
 def _():
-    from backend.profile_scoring.profile_manager import get_user_profile
+    from profile_scoring.profile_manager import get_user_profile
     p = get_user_profile("doesnt_exist_999")
     assert p is None
 
 @test("Reset profile")
 def _():
-    from backend.profile_scoring.profile_manager import (
+    from profile_scoring.profile_manager import (
         initialize_user_profile, reset_user_profile, get_user_profile,
     )
     initialize_user_profile("reset_test")
@@ -126,7 +126,7 @@ def _():
 
 @test("Top categories")
 def _():
-    from backend.profile_scoring.models import UserProfile
+    from profile_scoring.models import UserProfile
     p = UserProfile(user_id="top_test")
     p.category_scores["git"] = 0.9
     p.category_scores["testing"] = 0.8
@@ -142,15 +142,15 @@ print("\n── 3. Keyword Fallback Scorer ────────────�
 
 @test("Keyword scorer returns all categories")
 def _():
-    from backend.profile_scoring.gemini_scorer import _keyword_fallback
-    from backend.profile_scoring.categories import CATEGORY_KEYS
+    from profile_scoring.gemini_scorer import _keyword_fallback
+    from profile_scoring.categories import CATEGORY_KEYS
     result = _keyword_fallback("I wrote a Python class with inheritance and tested it with pytest")
     assert set(result.scores.keys()) == set(CATEGORY_KEYS)
     assert result.model_used == "keyword_fallback"
 
 @test("Keyword scorer detects OOP keywords")
 def _():
-    from backend.profile_scoring.gemini_scorer import _keyword_fallback
+    from profile_scoring.gemini_scorer import _keyword_fallback
     text = """
     I built a class hierarchy using inheritance and polymorphism.
     The base class has an abstract method. Each subclass overrides it.
@@ -164,7 +164,7 @@ def _():
 
 @test("Keyword scorer detects algorithms keywords")
 def _():
-    from backend.profile_scoring.gemini_scorer import _keyword_fallback
+    from profile_scoring.gemini_scorer import _keyword_fallback
     text = """
     Implemented quicksort and binary search. Analysed time complexity
     of O(n log n). Used dynamic programming with memoization for the
@@ -179,7 +179,7 @@ def _():
 
 @test("Keyword scorer – empty content → zeros")
 def _():
-    from backend.profile_scoring.gemini_scorer import _keyword_fallback
+    from profile_scoring.gemini_scorer import _keyword_fallback
     result = _keyword_fallback("")
     assert all(v == 0.0 for v in result.scores.values())
 
@@ -189,9 +189,9 @@ print("\n── 4. Merge / EMA Accumulation ────────────
 
 @test("Single merge updates from zero")
 def _():
-    from backend.profile_scoring.models import UserProfile, GeminiScoringResult
-    from backend.profile_scoring.profile_manager import merge_profile_scores
-    from backend.profile_scoring.categories import zero_scores
+    from profile_scoring.models import UserProfile, GeminiScoringResult
+    from profile_scoring.profile_manager import merge_profile_scores
+    from profile_scoring.categories import zero_scores
 
     p = UserProfile(user_id="merge_1")
     gs = GeminiScoringResult(scores={**zero_scores(), "git": 0.8, "testing": 0.6})
@@ -205,9 +205,9 @@ def _():
 
 @test("Multiple merges accumulate")
 def _():
-    from backend.profile_scoring.models import UserProfile, GeminiScoringResult
-    from backend.profile_scoring.profile_manager import merge_profile_scores
-    from backend.profile_scoring.categories import zero_scores
+    from profile_scoring.models import UserProfile, GeminiScoringResult
+    from profile_scoring.profile_manager import merge_profile_scores
+    from profile_scoring.categories import zero_scores
 
     p = UserProfile(user_id="merge_2")
 
@@ -222,9 +222,9 @@ def _():
 
 @test("Scores stay in [0, 1]")
 def _():
-    from backend.profile_scoring.models import UserProfile, GeminiScoringResult
-    from backend.profile_scoring.profile_manager import merge_profile_scores
-    from backend.profile_scoring.categories import zero_scores
+    from profile_scoring.models import UserProfile, GeminiScoringResult
+    from profile_scoring.profile_manager import merge_profile_scores
+    from profile_scoring.categories import zero_scores
 
     p = UserProfile(user_id="merge_clamp")
     for _ in range(50):
@@ -236,9 +236,9 @@ def _():
 
 @test("Weak uploads barely shift scores")
 def _():
-    from backend.profile_scoring.models import UserProfile, GeminiScoringResult
-    from backend.profile_scoring.profile_manager import merge_profile_scores
-    from backend.profile_scoring.categories import zero_scores
+    from profile_scoring.models import UserProfile, GeminiScoringResult
+    from profile_scoring.profile_manager import merge_profile_scores
+    from profile_scoring.categories import zero_scores
 
     p = UserProfile(user_id="merge_weak")
     # First set a baseline
@@ -261,9 +261,9 @@ print("\n── 5. Source-Type Weighting ─────────────
 
 @test("GitHub upload has stronger effect than text_prompt")
 def _():
-    from backend.profile_scoring.models import UserProfile, GeminiScoringResult
-    from backend.profile_scoring.profile_manager import merge_profile_scores
-    from backend.profile_scoring.categories import zero_scores
+    from profile_scoring.models import UserProfile, GeminiScoringResult
+    from profile_scoring.profile_manager import merge_profile_scores
+    from profile_scoring.categories import zero_scores
 
     p_gh = UserProfile(user_id="sw_github")
     p_txt = UserProfile(user_id="sw_text")
@@ -283,7 +283,7 @@ gemini_key = os.getenv("GEMINI_API_KEY", "")
 if gemini_key:
     @test("Gemini scores a Python OOP text")
     def _():
-        from backend.profile_scoring.gemini_scorer import score_content_with_gemini
+        from profile_scoring.gemini_scorer import score_content_with_gemini
         text = """
         I built a Python project using object-oriented design.
         Created a base Animal class with __init__ constructor.
@@ -311,7 +311,7 @@ if gemini_key:
 
     @test("Gemini scores a GitHub-style README")
     def _():
-        from backend.profile_scoring.gemini_scorer import score_content_with_gemini
+        from profile_scoring.gemini_scorer import score_content_with_gemini
         text = """
         Repository: awesome-sort
         Languages: C++, Python
@@ -331,7 +331,7 @@ if gemini_key:
 
     @test("Gemini handles very short content gracefully")
     def _():
-        from backend.profile_scoring.gemini_scorer import score_content_with_gemini
+        from profile_scoring.gemini_scorer import score_content_with_gemini
         result = score_content_with_gemini("Hi", source_type="text_prompt")
         # Should return zeros, not crash
         assert all(v == 0.0 for v in result.scores.values())
@@ -344,8 +344,8 @@ print("\n── 7. Orchestrator End-to-End ────────────�
 
 @test("Full flow: text_prompt upload")
 def _():
-    from backend.profile_scoring.orchestrator import update_profile_from_upload
-    from backend.profile_scoring.profile_manager import get_user_profile
+    from profile_scoring.orchestrator import update_profile_from_upload
+    from profile_scoring.profile_manager import get_user_profile
 
     result = update_profile_from_upload(
         user_id="e2e_user_1",
@@ -376,8 +376,8 @@ def _():
 
 @test("Full flow: second upload evolves profile")
 def _():
-    from backend.profile_scoring.orchestrator import update_profile_from_upload
-    from backend.profile_scoring.profile_manager import get_user_profile
+    from profile_scoring.orchestrator import update_profile_from_upload
+    from profile_scoring.profile_manager import get_user_profile
 
     p_before = get_user_profile("e2e_user_1")
     assert p_before is not None
@@ -409,20 +409,20 @@ print("\n── 8. Edge Cases ────────────────�
 
 @test("Empty content returns error")
 def _():
-    from backend.profile_scoring.orchestrator import update_profile_from_upload
+    from profile_scoring.orchestrator import update_profile_from_upload
     result = update_profile_from_upload("edge_user", "text_prompt", "")
     assert result["success"] is False
     assert "too short" in result["error"].lower()
 
 @test("Very short content returns error")
 def _():
-    from backend.profile_scoring.orchestrator import update_profile_from_upload
+    from profile_scoring.orchestrator import update_profile_from_upload
     result = update_profile_from_upload("edge_user", "text_prompt", "Hi")
     assert result["success"] is False
 
 @test("Unknown source type still works")
 def _():
-    from backend.profile_scoring.orchestrator import update_profile_from_upload
+    from profile_scoring.orchestrator import update_profile_from_upload
     result = update_profile_from_upload(
         "edge_user_2", "mystery_format",
         "This is a long enough text about Python functions and classes for scoring."

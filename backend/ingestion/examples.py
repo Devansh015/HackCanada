@@ -160,7 +160,7 @@ def example_5_custom_chunking():
     
     # Fixed-size chunking
     print("\nFixed-Size Chunking:")
-    from backend.ingestion import FixedSizeChunker
+    from ingestion import FixedSizeChunker
     
     fixed_chunker = FixedSizeChunker(chunk_size=200, overlap=50)
     chunks = fixed_chunker.chunk(long_text, metadata)

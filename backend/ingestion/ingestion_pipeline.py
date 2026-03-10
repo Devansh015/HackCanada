@@ -29,7 +29,7 @@ from .backboard_client import BackboardMemoryAdapter, BackboardAPIClient, LocalM
 
 # Profile scoring integration (optional – gracefully skipped if unavailable)
 try:
-    from backend.profile_scoring.orchestrator import update_profile_from_upload as _score_upload
+    from profile_scoring.orchestrator import update_profile_from_upload as _score_upload
     _HAS_PROFILE_SCORING = True
 except ImportError:
     _HAS_PROFILE_SCORING = False
