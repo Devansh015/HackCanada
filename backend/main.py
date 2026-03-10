@@ -22,32 +22,30 @@ app = FastAPI(
     version="1.0.0",
 )
 
-
-# CORS — allow frontend origins from env or fall back to localhost defaults (with trailing slashes and Vercel)
 _default_origins = [
     "http://localhost:3000",
-    "http://localhost:3000/",
     "http://127.0.0.1:3000",
-    "http://127.0.0.1:3000/",
     "http://localhost:3001",
-    "http://localhost:3001/",
-    "https://your-frontend.vercel.app/",
+    "https://cortex-frontend-rouge.vercel.app",
 ]
+
 _env_origins = os.getenv("CORS_ORIGINS", "")
-cors_origins = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _default_origins
+cors_origins = (
+    [o.strip().rstrip("/") for o in _env_origins.split(",") if o.strip()]
+    if _env_origins
+    else _default_origins
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount profile scoring routes
 app.include_router(profile_router, prefix="/api")
-
-# Mount chatbot routes
 app.include_router(chat_router, prefix="/api")
 
 @app.get("/")
