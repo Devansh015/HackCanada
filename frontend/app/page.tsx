@@ -122,16 +122,16 @@ export default function Home() {
 
       {/* Selected Region Info (optional future feature) */}
       {selectedRegion && (
-        <div className="fixed bottom-20 sm:bottom-8 left-4 sm:left-8 right-4 sm:right-auto z-40 bg-black/80 backdrop-blur-xl border border-white/15 rounded-xl px-4 sm:px-6 py-3 sm:py-4 text-white sm:min-w-[200px] max-w-[calc(100vw-2rem)] sm:max-w-none">
-          <div className="font-semibold text-base sm:text-lg pr-8">{selectedRegion.replace('Region_', '')}</div>
+        <div className="fixed bottom-24 sm:bottom-28 left-4 sm:left-8 z-40 bg-black/80 backdrop-blur-xl border border-white/15 rounded-xl px-4 sm:px-6 py-3 sm:py-4 text-white max-w-[200px] sm:max-w-[240px]">
+          <div className="font-semibold text-sm sm:text-base pr-6">{selectedRegion.replace('Region_', '')}</div>
           <div className="text-white/60 text-xs sm:text-sm mt-1">
             Proficiency: {Math.round((regionScores[selectedRegion as keyof typeof regionScores] ?? 0) * 100)}%
           </div>
           <button 
             onClick={() => setSelectedRegion(null)}
-            className="absolute top-2 right-2 text-white/40 hover:text-white/70 transition-colors p-1 min-w-[44px] min-h-[44px] flex items-center justify-center"
+            className="absolute top-2 right-2 text-white/40 hover:text-white/70 transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
