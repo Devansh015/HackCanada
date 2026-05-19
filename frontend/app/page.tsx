@@ -67,9 +67,15 @@ export default function Home() {
       <div className="hero-content relative z-10 min-h-screen flex flex-col justify-between p-4 sm:p-6 md:p-12 pb-20 sm:pb-6 md:pb-12 pointer-events-none">
         {/* Header */}
         <header className="flex items-center justify-between pointer-events-auto">
-          <div className="text-white/90 font-semibold text-lg sm:text-xl tracking-tight">
+          <a
+            href="https://github.com/Devansh015/Cortex"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open the Cortex GitHub repository"
+            className="text-white/90 hover:text-white font-semibold text-lg sm:text-xl tracking-tight transition-colors"
+          >
             CORTEX
-          </div>
+          </a>
           <div className={`flex items-center gap-2 sm:gap-3 transition-all duration-300 ${chatPanelOpen ? 'sm:mr-[320px] md:mr-[396px]' : ''}`}>
             <button
               onClick={resetSession}
